@@ -62,6 +62,156 @@ The current compiler surface supports:
 Both paths still depend on one minimal manual overlay for the two fields that are intentionally not
 auto-derived from upstream inputs.
 
+## Readiness verification harness
+
+The readiness verification harness is the operator-facing path for running live Gemini verification against the frozen `readiness_engine_output_v1` contract.
+
+Use it for:
+
+- operator-triggered live verification of readiness prompt behavior
+- producing bounded JSON artifacts for audit review
+- concise pass/fail diagnosis by contract
+
+Do **not** use it for:
+
+- CI live Gemini execution
+- autonomous polling, monitoring, or scheduling
+- altering the readiness schema or fail-closed doctrine
+
+### Readiness verification environment
+
+Required environment variable:
+
+- `GEMINI_API_KEY`
+
+Optional provider policy env vars are the same ones used by the main runtime CLI:
+
+- `NINJATRADEBUILDER_GEMINI_MODEL`
+- `NINJATRADEBUILDER_GEMINI_TIMEOUT_SECONDS`
+- `NINJATRADEBUILDER_GEMINI_MAX_RETRIES`
+- `NINJATRADEBUILDER_GEMINI_RETRY_INITIAL_DELAY_SECONDS`
+- `NINJATRADEBUILDER_GEMINI_RETRY_MAX_DELAY_SECONDS`
+
+### Readiness verification command surface
+
+Inspect the operator help surface with:
+
+```bash
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.readiness_verify --help
+```
+
+The CLI supports three explicit input modes:
+
+1. `--fixture` for deterministic fixture-backed verification
+2. `--packet-file` for packet JSON that must be converted into readiness runtime inputs
+3. `--runtime-input-file` for prebuilt readiness runtime input JSON
+
+Target selection is also explicit:
+
+- `--contract <symbol>` for one contract
+- `--all-contracts` for a packet-bundle sweep across exactly `ES`, `NQ`, `CL`, `ZN`, `6E`, and `MGC`
+
+Exit semantics are operator-script friendly:
+
+- exit `0`: every requested verification passed
+- exit `1`: the run executed but one or more contract verifications failed
+- exit `2`: operator input or configuration was invalid before a usable verification run could proceed
+
+### Readiness verification examples
+
+Single-contract deterministic fixture verification:
+
+```bash
+export GEMINI_API_KEY=your_existing_key
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.readiness_verify \
+  --fixture \
+  --contract ZN
+```
+
+Single-contract explicit packet-file verification:
+
+```bash
+export GEMINI_API_KEY=your_existing_key
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.readiness_verify \
+  --packet-file ./build/es.packet.json \
+  --trigger-file tests/fixtures/readiness/zn_recheck_trigger.valid.json \
+  --contract ES
+```
+
+Single-contract explicit runtime-input verification:
+
+```bash
+export GEMINI_API_KEY=your_existing_key
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.readiness_verify \
+  --runtime-input-file tests/fixtures/readiness/zn_runtime_inputs.valid.json \
+  --trigger-file tests/fixtures/readiness/zn_recheck_trigger.valid.json \
+  --contract ZN
+```
+
+All-contract packet-bundle sweep:
+
+```bash
+export GEMINI_API_KEY=your_existing_key
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.readiness_verify \
+  --packet-file tests/fixtures/packets.valid.json \
+  --trigger-file tests/fixtures/readiness/zn_recheck_trigger.valid.json \
+  --all-contracts
+```
+
+### Readiness verification artifacts
+
+Artifacts are written to `./artifacts/readiness-verification/<timestamp>.json` by default, or to the path supplied via `--artifact-file`.
+
+Each artifact contains:
+
+- top-level run metadata
+- per-contract verification results
+- the Gemini model identifier
+- invocation mode and source file references
+- a SHA-256 digest of the rendered prompt
+- validation status
+- explicit failure classification
+- a concise operator summary string per contract
+
+Example artifact shape:
+
+```json
+{
+  "artifact_schema": "readiness_verification_run_v1",
+  "run": {
+    "invocation_mode": "single_contract",
+    "model": "gemini-3.1-pro-preview",
+    "success": true,
+    "summary": "Readiness verification passed for 1/1 contract(s)."
+  },
+  "results": [
+    {
+      "contract": "ZN",
+      "passed": true,
+      "summary": "ZN: PASS (validated).",
+      "failure_classification": null,
+      "prompt": {
+        "prompt_id": 10,
+        "rendered_prompt_sha256": "<sha256>"
+      },
+      "validation": {
+        "outcome": "validated",
+        "output_boundary": "readiness_engine_output"
+      }
+    }
+  ]
+}
+```
+
+Interpretation guidance:
+
+- `run.success = true` means every requested contract passed validation
+- `results[].failure_classification` shows the first operator-relevant failure bucket
+- `results[].validated_output` contains the validated readiness payload when a contract passes
+- `results[].debug.raw_model_output_excerpt` is intentionally bounded for debugging and is not a full provider transcript
+
+Live Gemini readiness verification remains operator-invoked only and is not part of CI.
+
 ## Phase 1: compile one ES historical packet
 
 The compiler builds one frozen `historical_packet_v1` JSON file plus a provenance sidecar.

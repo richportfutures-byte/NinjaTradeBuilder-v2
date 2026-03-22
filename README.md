@@ -6,7 +6,7 @@ NinjaTradeBuilder is a staged futures-evaluation runtime for a simulated trading
 
 - Priority 1 behavioral baseline is frozen and validated on the canonical contract edge-case matrix.
 - The repo is installable as a Python package.
-- A thin operator CLI exists for local execution.
+- Thin operator CLIs exist for local pipeline execution and operator-invoked readiness verification.
 - Gemini execution uses bounded timeout and retry policy with clear failure output.
 - Local JSONL per-run audit logging exists.
 - GitHub Actions now runs install, test, and deterministic CLI smoke checks on push and PR.
@@ -31,6 +31,32 @@ env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.cli \
 ```
 
 If `--packet` is already a single `historical_packet_v1` JSON object, omit `--contract`.
+
+## Readiness Verification Harness
+
+The repo now includes an operator-invoked readiness verification CLI for the frozen `readiness_engine_output_v1` contract. It is intended for disciplined human-triggered verification runs and audit capture, not CI, not autonomous monitoring, and not background polling.
+
+Example single-contract runtime-input verification:
+
+```bash
+export GEMINI_API_KEY=your_existing_key
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.readiness_verify \
+  --runtime-input-file tests/fixtures/readiness/zn_runtime_inputs.valid.json \
+  --trigger-file tests/fixtures/readiness/zn_recheck_trigger.valid.json \
+  --contract ZN
+```
+
+Example all-contract packet-bundle sweep:
+
+```bash
+export GEMINI_API_KEY=your_existing_key
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.readiness_verify \
+  --packet-file tests/fixtures/packets.valid.json \
+  --trigger-file tests/fixtures/readiness/zn_recheck_trigger.valid.json \
+  --all-contracts
+```
+
+Artifacts default to `./artifacts/readiness-verification/<timestamp>.json` unless `--artifact-file` is provided. CI still does **not** run live Gemini readiness verification.
 
 ## Required Environment Variables
 
