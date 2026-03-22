@@ -55,7 +55,7 @@ class StructuredGenerationRequest:
 
 def _normalize_runtime_value(value: Any) -> Any:
     if isinstance(value, BaseModel):
-        return value.model_dump(by_alias=True)
+        return value.model_dump(mode="json", by_alias=True)
     return value
 
 

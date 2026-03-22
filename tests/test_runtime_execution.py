@@ -324,6 +324,23 @@ def test_trade_friendly_prompt_8_inputs_support_minimal_setup_proposed_execution
     assert result.validated_output.position_size == 1
 
 
+def test_prompt_8_accepts_validated_stage_b_model_inputs() -> None:
+    adapter = FakeStructuredAdapter(_minimal_valid_proposed_setup("ES"))
+    contract_analysis = ContractAnalysis.model_validate(_valid_contract_analysis("ES"))
+    runtime_inputs = _stage_c_inputs_trade_friendly("ES")
+    runtime_inputs["contract_analysis_json"] = contract_analysis
+
+    result = execute_prompt(
+        prompt_id=8,
+        runtime_inputs=runtime_inputs,
+        model_adapter=adapter,
+    )
+
+    assert result.output_boundary == "proposed_setup"
+    assert isinstance(result.validated_output, ProposedSetup)
+    assert '"timestamp": "2026-01-14T14:06:00Z"' in result.rendered_prompt
+
+
 def test_successful_contract_specific_prompt_execution_returns_typed_result() -> None:
     adapter = FakeStructuredAdapter(_valid_contract_analysis("CL"))
 
