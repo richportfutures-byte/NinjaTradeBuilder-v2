@@ -16,6 +16,9 @@ dependencies = [
 dev = [
   "pytest>=8,<9",
 ]
+databento = [
+  "databento>=0.57,<1",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

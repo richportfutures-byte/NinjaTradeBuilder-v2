@@ -44,7 +44,18 @@ def main() -> int:
 
     historical_input = Path("tests/fixtures/compiler/es_historical_input.valid.json")
     overlay_input = Path("tests/fixtures/compiler/es_overlay.assisted.valid.json")
-    if not historical_input.is_file() or not overlay_input.is_file():
+    calendar_input = Path("tests/fixtures/compiler/es_calendar.valid.json")
+    breadth_input = Path("tests/fixtures/compiler/es_breadth.valid.json")
+    index_cash_tone_input = Path("tests/fixtures/compiler/es_index_cash_tone.valid.json")
+    cumulative_delta_input = Path("tests/fixtures/compiler/es_cumulative_delta.valid.json")
+    if (
+        not historical_input.is_file()
+        or not overlay_input.is_file()
+        or not calendar_input.is_file()
+        or not breadth_input.is_file()
+        or not index_cash_tone_input.is_file()
+        or not cumulative_delta_input.is_file()
+    ):
         print("Compiler smoke runner could not find ES compiler fixtures", file=sys.stderr)
         return 2
 
@@ -60,6 +71,14 @@ def main() -> int:
                 str(historical_input),
                 "--overlay",
                 str(overlay_input),
+                "--calendar-input",
+                str(calendar_input),
+                "--breadth-input",
+                str(breadth_input),
+                "--index-cash-tone-input",
+                str(index_cash_tone_input),
+                "--cumulative-delta-input",
+                str(cumulative_delta_input),
                 "--output",
                 str(packet_path),
             ],

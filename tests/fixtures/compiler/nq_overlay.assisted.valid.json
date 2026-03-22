@@ -1,5 +1,5 @@
 {
-  "contract": "ES",
+  "contract": "NQ",
   "challenge_state": {
     "$schema": "challenge_state_v1",
     "current_balance": 50000.0,
@@ -48,5 +48,5 @@
       "MGC": null
     }
   },
-  "opening_type": "Open-Auction"
+  "opening_type": "Open-Drive"
 }
