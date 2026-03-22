@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping
+from pathlib import Path
 
 import pytest
 
@@ -8,8 +10,12 @@ from ninjatradebuilder.runtime import (
     PromptExecutionResult,
     StructuredGenerationRequest,
     execute_prompt,
+    run_readiness,
 )
-from ninjatradebuilder.schemas.outputs import ContractAnalysis, ProposedSetup
+from ninjatradebuilder.schemas.outputs import ContractAnalysis, ProposedSetup, ReadinessEngineOutput
+
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 class FakeStructuredAdapter:
@@ -20,6 +26,10 @@ class FakeStructuredAdapter:
     def generate_structured(self, request: StructuredGenerationRequest) -> Mapping[str, Any]:
         self.calls.append(request)
         return self.payload
+
+
+def _load_json_fixture(relative_path: str) -> dict[str, Any]:
+    return json.loads((FIXTURES_DIR / relative_path).read_text())
 
 
 def _stage_ab_inputs(contract: str) -> dict[str, Any]:
@@ -269,6 +279,51 @@ def _valid_sufficiency_gate_output(contract: str, status: str = "READY") -> dict
     if status == "INSUFFICIENT_DATA":
         output["disqualifiers"] = ["outside_allowed_hours"]
     return output
+
+
+@pytest.mark.parametrize(
+    ("trigger_payload", "expected_fixture", "expected_prompt_fragment"),
+    [
+        (
+            {"trigger_family": "price_level_touch", "price_level": 110.40625},
+            "readiness/zn_ready.expected.json",
+            '"trigger_family": "price_level_touch"',
+        ),
+        (
+            {"trigger_family": "recheck_at_time", "recheck_at_time": "2026-01-14T15:15:00Z"},
+            "readiness/zn_wait_for_trigger.expected.json",
+            '"recheck_at_time": "2026-01-14T15:15:00Z"',
+        ),
+        (
+            {"trigger_family": "price_level_touch", "price_level": 110.5},
+            "readiness/zn_locked_out.expected.json",
+            '"price_level": 110.5',
+        ),
+    ],
+)
+def test_run_readiness_executes_end_to_end_for_zn_golden_paths(
+    trigger_payload: dict[str, Any],
+    expected_fixture: str,
+    expected_prompt_fragment: str,
+) -> None:
+    runtime_inputs = _load_json_fixture("readiness/zn_runtime_inputs.valid.json")
+    expected_output = _load_json_fixture(expected_fixture)
+    adapter = FakeStructuredAdapter(expected_output)
+
+    result = run_readiness(
+        runtime_inputs=runtime_inputs,
+        readiness_trigger=trigger_payload,
+        model_adapter=adapter,
+    )
+
+    assert isinstance(result, PromptExecutionResult)
+    assert result.output_boundary == "readiness_engine_output"
+    assert isinstance(result.validated_output, ReadinessEngineOutput)
+    assert result.validated_output.model_dump(mode="json", by_alias=True) == expected_output
+    assert adapter.calls[0].expected_output_boundaries == ("readiness_engine_output",)
+    assert adapter.calls[0].schema_model_names == ("ReadinessEngineOutput",)
+    assert '"contract": "ZN"' in result.rendered_prompt
+    assert expected_prompt_fragment in result.rendered_prompt
 
 
 def test_successful_shared_prompt_execution_returns_typed_result() -> None:
