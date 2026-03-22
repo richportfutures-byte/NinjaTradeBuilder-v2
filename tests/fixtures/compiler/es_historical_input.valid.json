@@ -1,0 +1,97 @@
+{
+  "contract": "ES",
+  "prior_rth_bars": [
+    {
+      "timestamp": "2026-01-13T14:30:00Z",
+      "open": 5008.0,
+      "high": 5014.0,
+      "low": 5006.0,
+      "close": 5012.0,
+      "volume": 100.0
+    },
+    {
+      "timestamp": "2026-01-13T16:00:00Z",
+      "open": 5012.0,
+      "high": 5018.0,
+      "low": 5009.0,
+      "close": 5015.0,
+      "volume": 150.0
+    },
+    {
+      "timestamp": "2026-01-13T19:30:00Z",
+      "open": 5015.0,
+      "high": 5020.0,
+      "low": 5010.0,
+      "close": 5013.0,
+      "volume": 120.0
+    }
+  ],
+  "overnight_bars": [
+    {
+      "timestamp": "2026-01-13T23:00:00Z",
+      "open": 5013.0,
+      "high": 5016.0,
+      "low": 5009.0,
+      "close": 5011.0,
+      "volume": 80.0
+    },
+    {
+      "timestamp": "2026-01-14T05:00:00Z",
+      "open": 5011.0,
+      "high": 5019.0,
+      "low": 5008.0,
+      "close": 5017.0,
+      "volume": 90.0
+    },
+    {
+      "timestamp": "2026-01-14T13:00:00Z",
+      "open": 5017.0,
+      "high": 5022.0,
+      "low": 5012.0,
+      "close": 5018.0,
+      "volume": 70.0
+    }
+  ],
+  "current_rth_bars": [
+    {
+      "timestamp": "2026-01-14T14:30:00Z",
+      "open": 5018.0,
+      "high": 5024.0,
+      "low": 5016.0,
+      "close": 5022.0,
+      "volume": 200.0
+    },
+    {
+      "timestamp": "2026-01-14T15:00:00Z",
+      "open": 5022.0,
+      "high": 5028.0,
+      "low": 5020.0,
+      "close": 5026.0,
+      "volume": 220.0
+    },
+    {
+      "timestamp": "2026-01-14T15:30:00Z",
+      "open": 5026.0,
+      "high": 5030.0,
+      "low": 5024.0,
+      "close": 5029.0,
+      "volume": 210.0
+    },
+    {
+      "timestamp": "2026-01-14T16:00:00Z",
+      "open": 5029.0,
+      "high": 5032.0,
+      "low": 5025.0,
+      "close": 5031.0,
+      "volume": 190.0
+    }
+  ],
+  "weekly_open_bar": {
+    "timestamp": "2026-01-12T14:30:00Z",
+    "open": 4998.0,
+    "high": 5004.0,
+    "low": 4994.0,
+    "close": 5002.0,
+    "volume": 120.0
+  }
+}

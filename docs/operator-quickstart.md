@@ -37,6 +37,38 @@ python3 -m venv .venv
 
 Use `gemini-3.1-pro-preview` for the current validated branch baseline.
 
+## Compile one ES historical packet
+
+The compiler is an upstream step. It builds one frozen `historical_packet_v1` JSON file plus a
+provenance sidecar. The current v1 compiler supports `ES` only.
+
+Example:
+
+```bash
+env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.packet_compiler.cli \
+  --contract ES \
+  --historical-input tests/fixtures/compiler/es_historical_input.valid.json \
+  --overlay tests/fixtures/compiler/es_overlay.valid.json \
+  --output ./build/es.packet.json
+```
+
+This writes:
+
+- `./build/es.packet.json`
+- `./build/es.packet.provenance.json`
+
+The compiler currently derives and records provenance for:
+
+- prior RTH high / low / close
+- overnight high / low
+- VWAP
+- session range
+- initial balance high / low / range
+- weekly open
+
+`initial balance` and `weekly open` are recorded in the provenance sidecar because the frozen
+runtime packet schema does not have dedicated top-level fields for them.
+
 ## Minimum smoke path
 
 Preferred CLI form:
@@ -44,12 +76,12 @@ Preferred CLI form:
 ```bash
 export GEMINI_API_KEY=your_existing_key
 env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.cli \
-  --packet tests/fixtures/packets.valid.json \
-  --contract ES \
+  --packet ./build/es.packet.json \
   --audit-log ./logs/ninjatradebuilder.audit.jsonl
 ```
 
-- If `--packet` is already a single `historical_packet_v1` JSON object, omit `--contract`.
+- If `--packet` points to a multi-contract bundle like `tests/fixtures/packets.valid.json`, add
+  `--contract ES`.
 - `--evaluation-timestamp` is optional. If omitted, the CLI uses `market_packet.timestamp`.
 - `--model` is optional. The default is `gemini-3.1-pro-preview`.
 - `--audit-log` is optional. When supplied, the CLI appends one JSON record per run.
