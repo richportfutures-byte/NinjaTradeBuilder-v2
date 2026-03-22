@@ -235,7 +235,9 @@ PROMPT_2_ES = _build_contract_prompt(
 7. Delta context: cumulative delta confirmation or divergence.
 8. Volume pace: above or below average for this time.
 9. Cross-market context: ZN and DXY risk-on/risk-off tone.
-10. Key levels: identify the three most relevant support/resistance levels from structured data.""",
+10. Key levels: identify the three most relevant support/resistance levels from structured data.
+11. If breadth, index_cash_tone, or cumulative_delta materially diverge from price direction, treat that as caution. If multiple divergence signals remain unresolved, favor outcome = NO_TRADE unless one coherent dominant driver is clearly established from structured inputs.
+12. Do not return ANALYSIS_COMPLETE when price direction is not confirmed and the ES causal map remains conflict-heavy across breadth, cash tone, and delta.""",
     warnings="""- Breadth divergence is a warning signal, not a setup by itself.
 - Low-volume action should reduce conviction.
 - Stage B may return outcome = NO_TRADE when evidence is too weak to support a usable read.""",

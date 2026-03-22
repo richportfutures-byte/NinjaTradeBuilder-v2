@@ -402,6 +402,27 @@ def test_prompt_7_schema_hint_hardens_mgc_contradiction_fail_closed_rule() -> No
     assert "directional_bias must use only the schema literals bullish, bearish, neutral, or unclear" in payload_description
 
 
+def test_prompt_2_schema_hint_hardens_es_divergence_fail_closed_rule() -> None:
+    client = FakeGeminiClient(_envelope("contract_analysis", _valid_contract_analysis("ES")))
+    adapter = GeminiResponsesAdapter(client=client, model="gemini-3.1-pro-preview")
+    request = StructuredGenerationRequest(
+        prompt_id=2,
+        rendered_prompt="rendered es prompt",
+        expected_output_boundaries=("sufficiency_gate_output", "contract_analysis"),
+        schema_model_names=("SufficiencyGateOutput", "ContractAnalysis"),
+    )
+
+    adapter.generate_structured(request)
+
+    payload_description = client.models.calls[0]["config"]["response_json_schema"]["properties"][
+        "payload"
+    ]["description"]
+    assert "breadth, index_cash_tone, or cumulative_delta materially diverge from price direction" in payload_description
+    assert "multiple divergence signals remain unresolved" in payload_description
+    assert "favor outcome NO_TRADE rather than ANALYSIS_COMPLETE" in payload_description
+    assert "coherent dominant driver is clearly established" in payload_description
+
+
 def test_prompt_3_schema_hint_hardens_nq_relative_strength_fail_closed_rule() -> None:
     client = FakeGeminiClient(_envelope("contract_analysis", _valid_contract_analysis("NQ")))
     adapter = GeminiResponsesAdapter(client=client, model="gemini-3.1-pro-preview")

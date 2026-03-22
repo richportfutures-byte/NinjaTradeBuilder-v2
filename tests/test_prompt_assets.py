@@ -98,12 +98,15 @@ def test_all_stage_ab_prompts_include_shared_correction_anchors() -> None:
 
 
 def test_contract_specific_prompt_corrections_are_present() -> None:
+    es = render_prompt(2, _stage_ab_inputs())
     nq = render_prompt(3, _stage_ab_inputs())
     cl = render_prompt(4, _stage_ab_inputs())
     zn = render_prompt(5, _stage_ab_inputs())
     six_e = render_prompt(6, _stage_ab_inputs())
     mgc = render_prompt(7, _stage_ab_inputs())
 
+    assert "If breadth, index_cash_tone, or cumulative_delta materially diverge from price direction" in es
+    assert "Do not return ANALYSIS_COMPLETE when price direction is not confirmed" in es
     assert 'data_quality_flag "megacap_earnings_risk"' in nq
     assert 'If relative_strength_vs_es < 1.0 and megacap leadership is fragile, lagging, or earnings-risk driven, favor outcome = NO_TRADE' in nq
     assert "Do not return ANALYSIS_COMPLETE when relative_strength_vs_es shows NQ lagging ES" in nq

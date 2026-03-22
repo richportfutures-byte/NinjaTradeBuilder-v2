@@ -148,6 +148,14 @@ class GeminiResponsesAdapter:
                 "NO_TRADE rather than ANALYSIS_COMPLETE unless broad leadership and one coherent "
                 "dominant driver are clearly established from structured inputs."
             )
+        if request.prompt_id == 2:
+            description += (
+                " For Prompt 2 ES specifically, if breadth, index_cash_tone, or "
+                "cumulative_delta materially diverge from price direction and multiple "
+                "divergence signals remain unresolved, favor outcome NO_TRADE rather than "
+                "ANALYSIS_COMPLETE unless one coherent dominant driver is clearly established "
+                "from structured inputs."
+            )
         if request.prompt_id == 9:
             description += (
                 " For risk_authorization responses, always emit the full schema object with "
