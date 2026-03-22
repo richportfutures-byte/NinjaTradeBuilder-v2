@@ -132,6 +132,15 @@ class GeminiResponsesAdapter:
                 "data_quality_flags, staleness_check, challenge_state_valid, or "
                 "event_lockout_detail into contract_analysis."
             )
+        if request.prompt_id == 7:
+            description += (
+                " For Prompt 7 MGC specifically, if macro_fear_catalyst_summary is not none and "
+                "DXY and yield drivers remain materially contradictory or the causal map is "
+                "unstable, favor outcome NO_TRADE rather than ANALYSIS_COMPLETE unless one "
+                "coherent dominant driver is clearly established from structured inputs. "
+                "directional_bias must use only the schema literals bullish, bearish, neutral, "
+                "or unclear; never emit up, down, long, short, or any synonym."
+            )
         if request.prompt_id == 9:
             description += (
                 " For risk_authorization responses, always emit the full schema object with "

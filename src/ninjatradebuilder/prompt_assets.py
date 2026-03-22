@@ -351,7 +351,10 @@ PROMPT_7_MGC = _build_contract_prompt(
 6. Delta and volume during COMEX hours.
 7. Cross-market context: precious-metals complex, equity tone, treasury yields.
 8. Key levels: daily, weekly, and major round numbers.
-9. If DXY and yield context both contradict price direction, evidence_score must not exceed 5.""",
+9. If DXY and yield context both contradict price direction, evidence_score must not exceed 5.
+10. If macro_fear_catalyst_summary != "none" and DXY/yield drivers remain materially contradictory or causally unstable, favor outcome = NO_TRADE unless one coherent dominant driver is clearly established from structured inputs.
+11. Do not return ANALYSIS_COMPLETE when fear-catalyst instability is active and the directional causal map is unresolved or contradictory.
+12. directional_bias must use only schema-valid literals: bullish, bearish, neutral, or unclear. Do not emit up, down, long, short, or other synonyms.""",
     warnings="""- MGC has a small tick value but large allowed size; sizing math can still become meaningful at scale.
 - Fear-driven moves can override technical structure and shorten acceptable hold times.
 - Gold may have priced in global overnight macro moves before COMEX opens.""",

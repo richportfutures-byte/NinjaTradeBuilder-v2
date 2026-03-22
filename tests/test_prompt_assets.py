@@ -102,6 +102,7 @@ def test_contract_specific_prompt_corrections_are_present() -> None:
     cl = render_prompt(4, _stage_ab_inputs())
     zn = render_prompt(5, _stage_ab_inputs())
     six_e = render_prompt(6, _stage_ab_inputs())
+    mgc = render_prompt(7, _stage_ab_inputs())
 
     assert 'data_quality_flag "megacap_earnings_risk"' in nq
     assert 'eia_timing.status = "released" and minutes_since < 15' in cl
@@ -109,6 +110,9 @@ def test_contract_specific_prompt_corrections_are_present() -> None:
     assert "auction_proximity_risk" in zn
     assert "0.125 / 0.015625 = 8" in zn
     assert 'data_quality_flag "london_close_thin_liquidity"' in six_e
+    assert 'favor outcome = NO_TRADE unless one coherent dominant driver is clearly established' in mgc
+    assert "Do not return ANALYSIS_COMPLETE when fear-catalyst instability is active" in mgc
+    assert "directional_bias must use only schema-valid literals: bullish, bearish, neutral, or unclear." in mgc
 
 
 def test_stage_c_prompt_contains_shared_runtime_corrections() -> None:

@@ -380,6 +380,28 @@ def test_prompt_2_schema_hint_hardens_sufficiency_gate_shape() -> None:
     assert "Do not leak Stage A fields such as status" in payload_description
 
 
+def test_prompt_7_schema_hint_hardens_mgc_contradiction_fail_closed_rule() -> None:
+    client = FakeGeminiClient(_envelope("contract_analysis", _valid_contract_analysis("MGC")))
+    adapter = GeminiResponsesAdapter(client=client, model="gemini-3.1-pro-preview")
+    request = StructuredGenerationRequest(
+        prompt_id=7,
+        rendered_prompt="rendered mgc prompt",
+        expected_output_boundaries=("sufficiency_gate_output", "contract_analysis"),
+        schema_model_names=("SufficiencyGateOutput", "ContractAnalysis"),
+    )
+
+    adapter.generate_structured(request)
+
+    payload_description = client.models.calls[0]["config"]["response_json_schema"]["properties"][
+        "payload"
+    ]["description"]
+    assert "macro_fear_catalyst_summary is not none" in payload_description
+    assert "DXY and yield drivers remain materially contradictory" in payload_description
+    assert "favor outcome NO_TRADE rather than ANALYSIS_COMPLETE" in payload_description
+    assert "coherent dominant driver is clearly established" in payload_description
+    assert "directional_bias must use only the schema literals bullish, bearish, neutral, or unclear" in payload_description
+
+
 def test_prompt_8_schema_hint_hardens_no_trade_shape() -> None:
     client = FakeGeminiClient(_envelope("proposed_setup", _valid_proposed_setup("ES")))
     adapter = GeminiResponsesAdapter(client=client, model="gemini-3.1-pro-preview")
