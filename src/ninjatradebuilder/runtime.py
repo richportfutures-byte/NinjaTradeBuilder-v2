@@ -5,21 +5,34 @@ from typing import Any, Mapping, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from .prompt_assets import PromptAsset, get_prompt_asset
+from .prompt_assets import (
+    READINESS_PROMPT_ID,
+    READINESS_SUPPORTED_TRIGGER_FAMILIES,
+    PromptAsset,
+    get_prompt_asset,
+)
 from .schemas.outputs import (
     ContractAnalysis,
     ProposedSetup,
+    ReadinessEngineOutput,
     RiskAuthorization,
     SufficiencyGateOutput,
 )
 
-ValidatedOutput = SufficiencyGateOutput | ContractAnalysis | ProposedSetup | RiskAuthorization
+ValidatedOutput = (
+    SufficiencyGateOutput
+    | ContractAnalysis
+    | ProposedSetup
+    | RiskAuthorization
+    | ReadinessEngineOutput
+)
 
 BOUNDARY_MODEL_REGISTRY = {
     "sufficiency_gate_output": SufficiencyGateOutput,
     "contract_analysis": ContractAnalysis,
     "proposed_setup": ProposedSetup,
     "risk_authorization": RiskAuthorization,
+    "readiness_engine_output": ReadinessEngineOutput,
 }
 
 CONTRACT_SLOT_NAMES = (
@@ -28,6 +41,14 @@ CONTRACT_SLOT_NAMES = (
     "contract_specific_extension_json",
     "contract_analysis_json",
     "proposed_setup_json",
+)
+
+READINESS_TIME_RECHECK_TIMESTAMP_SLOT_NAMES = (
+    "recheck_at_time",
+)
+
+READINESS_PRICE_LEVEL_SLOT_NAMES = (
+    "price_level",
 )
 
 
@@ -126,6 +147,75 @@ def _validate_structured_output(asset: PromptAsset, raw_model_output: Any) -> tu
     return matches[0]
 
 
+def _first_non_empty_string(
+    payload: Mapping[str, Any],
+    slot_names: tuple[str, ...],
+) -> tuple[str, str] | None:
+    for slot_name in slot_names:
+        value = payload.get(slot_name)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                return slot_name, normalized
+    return None
+
+
+def _first_numeric_value(payload: Mapping[str, Any], slot_names: tuple[str, ...]) -> tuple[str, float] | None:
+    for slot_name in slot_names:
+        value = payload.get(slot_name)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            return slot_name, float(value)
+    return None
+
+
+def _normalize_readiness_trigger(readiness_trigger: Any) -> dict[str, Any]:
+    normalized_trigger = _normalize_runtime_value(readiness_trigger)
+    if not isinstance(normalized_trigger, Mapping):
+        raise ValueError("Readiness trigger must be a mapping payload.")
+
+    family_match = _first_non_empty_string(normalized_trigger, ("trigger_family",))
+    if family_match is None:
+        raise ValueError(
+            "Readiness trigger is malformed: missing non-empty trigger_family."
+        )
+
+    _, trigger_family = family_match
+    if trigger_family not in READINESS_SUPPORTED_TRIGGER_FAMILIES:
+        raise ValueError(
+            "Readiness trigger family is unsupported; supported families are "
+            f"{READINESS_SUPPORTED_TRIGGER_FAMILIES}."
+        )
+
+    normalized_payload = dict(normalized_trigger)
+    normalized_payload["trigger_family"] = trigger_family
+
+    if trigger_family == "recheck_at_time":
+        recheck_match = _first_non_empty_string(
+            normalized_trigger,
+            READINESS_TIME_RECHECK_TIMESTAMP_SLOT_NAMES,
+        )
+        if recheck_match is None:
+            raise ValueError(
+                "Readiness trigger is malformed for recheck_at_time: "
+                "missing non-empty recheck_at_time/target_time."
+            )
+        _, recheck_at_time = recheck_match
+        normalized_payload["recheck_at_time"] = recheck_at_time
+        return normalized_payload
+
+    price_level_match = _first_numeric_value(normalized_trigger, READINESS_PRICE_LEVEL_SLOT_NAMES)
+    if price_level_match is None:
+        raise ValueError(
+            "Readiness trigger is malformed for price_level_touch: "
+            "missing numeric price_level/trigger_price/price."
+        )
+    _, price_level = price_level_match
+    normalized_payload["price_level"] = price_level
+    return normalized_payload
+
+
 def _build_generation_request(asset: PromptAsset, rendered_prompt: str) -> StructuredGenerationRequest:
     return StructuredGenerationRequest(
         prompt_id=asset.prompt_id,
@@ -175,3 +265,29 @@ def execute_prompt(
         raw_model_output=raw_model_output,
         validated_output=validated_output,
     )
+
+
+def run_readiness(
+    *,
+    runtime_inputs: Mapping[str, Any],
+    readiness_trigger: Any,
+    model_adapter: StructuredModelAdapter,
+) -> PromptExecutionResult:
+    normalized_runtime_inputs = dict(runtime_inputs)
+    normalized_runtime_inputs["readiness_trigger_json"] = _normalize_readiness_trigger(
+        readiness_trigger
+    )
+
+    result = execute_prompt(
+        prompt_id=READINESS_PROMPT_ID,
+        runtime_inputs=normalized_runtime_inputs,
+        model_adapter=model_adapter,
+    )
+
+    if result.output_boundary != "readiness_engine_output":
+        raise ValueError(
+            "Readiness execution matched an unexpected boundary; "
+            f"expected readiness_engine_output, got {result.output_boundary}."
+        )
+
+    return result

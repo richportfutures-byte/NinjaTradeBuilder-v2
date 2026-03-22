@@ -12,6 +12,7 @@ from ninjatradebuilder.schemas.outputs import (
     LoggingRecord,
     PostTradeReviewRecord,
     ProposedSetup,
+    ReadinessEngineOutput,
     RiskAuthorization,
     SufficiencyGateOutput,
 )
@@ -59,6 +60,64 @@ def _sufficiency_gate_output(contract: str, status: str = "READY") -> dict:
             "lockout_type": "pre_event",
         }
     return payload
+
+
+def _readiness_engine_output(contract: str, family: str = "recheck_at_time") -> dict:
+    trigger_data = {
+        "family": "recheck_at_time",
+        "recheck_at_time": "2026-03-22T12:05:00Z",
+    }
+    if family == "price_level_touch":
+        trigger_data = {
+            "family": "price_level_touch",
+            "price_level": 4492.25,
+        }
+
+    return {
+        "$schema": "readiness_engine_output_v1",
+        "stage": "readiness_engine",
+        "authority": "ESCALATE_ONLY",
+        "contract": contract,
+        "timestamp": "2026-03-22T12:00:00Z",
+        "status": "WAIT_FOR_TRIGGER",
+        "doctrine_gates": [
+            {
+                "gate": "data_sufficiency_gate",
+                "state": "PASS",
+                "rationale": "Data complete.",
+            },
+            {
+                "gate": "context_alignment_gate",
+                "state": "PASS",
+                "rationale": "Context aligned.",
+            },
+            {
+                "gate": "structure_quality_gate",
+                "state": "PASS",
+                "rationale": "Structure valid.",
+            },
+            {
+                "gate": "trigger_gate",
+                "state": "WAIT",
+                "rationale": "Waiting for trigger.",
+            },
+            {
+                "gate": "risk_window_gate",
+                "state": "PASS",
+                "rationale": "Risk window open.",
+            },
+            {
+                "gate": "lockout_gate",
+                "state": "PASS",
+                "rationale": "No lockout active.",
+            },
+        ],
+        "trigger_data": trigger_data,
+        "wait_for_trigger_reason": "timing_window_not_open",
+        "lockout_reason": None,
+        "insufficient_data_reasons": [],
+        "missing_inputs": [],
+    }
 
 
 def _contract_analysis(contract: str) -> dict:
@@ -259,7 +318,95 @@ def test_event_lockout_detail_is_forbidden_when_status_is_not_event_lockout() ->
 
     assert "only be populated" in str(exc_info.value)
 
+def test_valid_event_lockout_trigger_payload_passes_sufficiency_validation() -> None:
+    validated = SufficiencyGateOutput.model_validate(
+        _sufficiency_gate_output("ES", status="EVENT_LOCKOUT")
+    )
 
+    assert validated.status == "EVENT_LOCKOUT"
+    assert validated.event_lockout_detail is not None
+    assert validated.event_lockout_detail.lockout_type == "pre_event"
+
+
+def test_readiness_engine_accepts_recheck_at_time_trigger_family() -> None:
+    validated = ReadinessEngineOutput.model_validate(
+        _readiness_engine_output("ES", family="recheck_at_time")
+    )
+
+    assert validated.trigger_data is not None
+    assert validated.trigger_data.family == "recheck_at_time"
+
+
+def test_readiness_engine_accepts_price_level_touch_trigger_family() -> None:
+    validated = ReadinessEngineOutput.model_validate(
+        _readiness_engine_output("ES", family="price_level_touch")
+    )
+
+    assert validated.trigger_data is not None
+    assert validated.trigger_data.family == "price_level_touch"
+
+
+def test_readiness_engine_rejects_unsupported_time_recheck_trigger_family() -> None:
+    invalid = _readiness_engine_output("ES", family="recheck_at_time")
+    invalid["trigger_data"]["family"] = "time_recheck"
+
+    with pytest.raises(ValidationError) as exc_info:
+        ReadinessEngineOutput.model_validate(invalid)
+
+    message = str(exc_info.value)
+    assert "trigger_data.family" in message
+    assert "recheck_at_time" in message
+    assert "price_level_touch" in message
+
+
+def test_event_lockout_rejects_malformed_trigger_payload() -> None:
+    invalid = _sufficiency_gate_output("ES", status="EVENT_LOCKOUT")
+    invalid["event_lockout_detail"] = {
+        "event_name": "CPI",
+        "event_time": "2026-01-14T13:30:00Z",
+        "minutes_since": 2,
+        "lockout_type": "post_event",
+        "trigger_payload": {"price": 4490.0},
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        SufficiencyGateOutput.model_validate(invalid)
+
+    message = str(exc_info.value)
+    assert "event_lockout_detail.minutes_until" in message
+    assert "event_lockout_detail.minutes_since" in message
+    assert "event_lockout_detail.trigger_payload" in message
+
+
+def test_readiness_output_cannot_be_used_as_stage_c_contract_analysis_input() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        ContractAnalysis.model_validate(_readiness_engine_output("ES"))
+
+    message = str(exc_info.value)
+    assert "market_regime" in message
+    assert "value_context" in message
+    assert "evidence_score" in message
+
+
+def test_readiness_engine_requires_escalate_only_authority() -> None:
+    invalid = _readiness_engine_output("ES")
+    invalid["authority"] = "TRADE_AUTHORIZATION"
+
+    with pytest.raises(ValidationError) as exc_info:
+        ReadinessEngineOutput.model_validate(invalid)
+
+    message = str(exc_info.value)
+    assert "authority" in message
+    assert "ESCALATE_ONLY" in message
+
+
+def test_readiness_output_cannot_be_used_as_risk_authorization_input() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        RiskAuthorization.model_validate(_readiness_engine_output("ES"))
+
+    message = str(exc_info.value)
+    assert "decision" in message
+    assert "checks" in message
 def test_risk_authorization_requires_checks_count_and_ordered_check_ids() -> None:
     invalid = _risk_authorization("ES")
     invalid["checks_count"] = 12

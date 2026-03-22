@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 PLACEHOLDER_RE = re.compile(r"<<([a-z0-9_]+)>>")
+READINESS_PROMPT_ID = 10
+READINESS_SUPPORTED_TRIGGER_FAMILIES: tuple[str, ...] = (
+    "recheck_at_time",
+    "price_level_touch",
+)
 
 
 def _stringify_prompt_value(value: Any) -> str:
@@ -485,6 +490,63 @@ Expected output boundary: risk_authorization
 """
 
 
+PROMPT_10_READINESS_ENGINE = """<<master_doctrine_text>>
+
+PROMPT: Readiness Engine
+SCOPE: Standalone readiness escalation surface
+
+RUNTIME INPUTS:
+- evaluation_timestamp: <<evaluation_timestamp_iso>>
+- challenge_state JSON:
+<<challenge_state_json>>
+- contract_metadata JSON:
+<<contract_metadata_json>>
+- market_packet JSON:
+<<market_packet_json>>
+- contract_specific_extension JSON:
+<<contract_specific_extension_json>>
+- attached_visuals JSON:
+<<attached_visuals_json>>
+- readiness_trigger JSON:
+<<readiness_trigger_json>>
+
+READINESS AUTHORITY RULES:
+- This is a standalone readiness surface and is non-interchangeable with Stage A+B and Stage C outputs.
+- This stage has escalation authority only. It does not authorize trades and must never emit risk_authorization output.
+- Supported trigger families for v1 only: recheck_at_time, price_level_touch.
+- If trigger family is unsupported or trigger payload is malformed, fail closed and return INSUFFICIENT_DATA using missing_trigger_context semantics.
+
+STATUS RULES:
+- READY: all doctrine gates PASS.
+- WAIT_FOR_TRIGGER: trigger_gate must be WAIT and all other doctrine gates PASS.
+- LOCKED_OUT: lockout_gate must be FAIL and all other doctrine gates PASS.
+- INSUFFICIENT_DATA: data_sufficiency_gate must be FAIL and all other doctrine gates PASS.
+
+OUTPUT: readiness_engine_output JSON only.
+Expected output boundary: readiness_engine_output
+"""
+
+
+READINESS_PROMPT_ASSET = PromptAsset(
+    prompt_id=READINESS_PROMPT_ID,
+    name="Readiness Engine",
+    contract_scope="shared",
+    stages=("R",),
+    expected_output_boundaries=("readiness_engine_output",),
+    required_slots=(
+        "master_doctrine_text",
+        "evaluation_timestamp_iso",
+        "challenge_state_json",
+        "contract_metadata_json",
+        "market_packet_json",
+        "contract_specific_extension_json",
+        "attached_visuals_json",
+        "readiness_trigger_json",
+    ),
+    template=PROMPT_10_READINESS_ENGINE,
+)
+
+
 PROMPT_REGISTRY: dict[int, PromptAsset] = {
     1: PromptAsset(
         prompt_id=1,
@@ -633,6 +695,9 @@ PROMPT_REGISTRY: dict[int, PromptAsset] = {
 
 
 def get_prompt_asset(prompt_id: int) -> PromptAsset:
+    if prompt_id == READINESS_PROMPT_ID:
+        return READINESS_PROMPT_ASSET
+
     try:
         return PROMPT_REGISTRY[prompt_id]
     except KeyError as exc:
