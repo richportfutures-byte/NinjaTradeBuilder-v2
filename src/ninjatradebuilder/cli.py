@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from .audit import AuditError, append_audit_record, utc_now_iso
 from .config import (
     DEFAULT_GEMINI_MODEL,
     ConfigError,
@@ -48,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         default=DEFAULT_GEMINI_MODEL,
         help=f"Gemini model identifier. Defaults to {DEFAULT_GEMINI_MODEL}.",
+    )
+    parser.add_argument(
+        "--audit-log",
+        help="Optional path to append one structured JSON audit record per CLI run.",
     )
     return parser
 
@@ -111,6 +116,55 @@ def serialize_pipeline_result(result: PipelineExecutionResult) -> dict[str, Any]
     return _normalize_for_json(result)
 
 
+def _classify_failure(exc: Exception) -> str:
+    if isinstance(exc, ConfigError):
+        return "config_error"
+    if isinstance(exc, GeminiAdapterError):
+        return "provider_error"
+    if isinstance(exc, ImportError):
+        return "dependency_error"
+    if isinstance(exc, ValueError):
+        return "input_error"
+    return "unexpected_error"
+
+
+def _build_audit_record(
+    *,
+    started_at: str,
+    finished_at: str,
+    packet_path: str,
+    requested_contract: str | None,
+    evaluation_timestamp: str | None,
+    config: GeminiStartupConfig | None,
+    result: PipelineExecutionResult | None,
+    error: Exception | None,
+) -> dict[str, Any]:
+    return {
+        "audit_schema": "operator_cli_run_v1",
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "provider": "gemini",
+        "packet_path": packet_path,
+        "requested_contract": requested_contract,
+        "contract": result.contract if result is not None else requested_contract,
+        "evaluation_timestamp": evaluation_timestamp,
+        "model": config.model if config is not None else None,
+        "timeout_seconds": config.timeout_seconds if config is not None else None,
+        "max_retries": config.max_retries if config is not None else None,
+        "retry_initial_delay_seconds": (
+            config.retry_initial_delay_seconds if config is not None else None
+        ),
+        "retry_max_delay_seconds": config.retry_max_delay_seconds if config is not None else None,
+        "success": error is None,
+        "status": "success" if error is None else "failure",
+        "termination_stage": result.termination_stage if result is not None else None,
+        "final_decision": result.final_decision if result is not None else None,
+        "error_category": _classify_failure(error) if error is not None else None,
+        "error_type": error.__class__.__name__ if error is not None else None,
+        "error_message": str(error) if error is not None else None,
+    }
+
+
 def _build_client(config: GeminiStartupConfig, client_factory: ClientFactory | None) -> Any:
     if client_factory is not None:
         return client_factory(config)
@@ -133,6 +187,11 @@ def run_cli(
     stderr = stderr or sys.stderr
     parser = build_parser()
     args = parser.parse_args(argv)
+    started_at = utc_now_iso()
+    config: GeminiStartupConfig | None = None
+    result: PipelineExecutionResult | None = None
+    error: Exception | None = None
+    evaluation_timestamp: str | None = None
 
     try:
         config = load_gemini_startup_config(model=args.model)
@@ -153,7 +212,27 @@ def run_cli(
             model_adapter=adapter,
         )
     except (ConfigError, GeminiAdapterError, ImportError, ValueError) as exc:
-        stderr.write(f"ERROR: {exc}\n")
+        error = exc
+
+    if args.audit_log:
+        audit_record = _build_audit_record(
+            started_at=started_at,
+            finished_at=utc_now_iso(),
+            packet_path=str(Path(args.packet)),
+            requested_contract=args.contract,
+            evaluation_timestamp=evaluation_timestamp,
+            config=config,
+            result=result,
+            error=error,
+        )
+        try:
+            append_audit_record(Path(args.audit_log), audit_record)
+        except AuditError as exc:
+            stderr.write(f"ERROR: {exc}\n")
+            return 2
+
+    if error is not None:
+        stderr.write(f"ERROR: {error}\n")
         return 2
 
     stdout.write(json.dumps(serialize_pipeline_result(result), indent=2, sort_keys=True))

@@ -45,12 +45,14 @@ Preferred CLI form:
 export GEMINI_API_KEY=your_existing_key
 env PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m ninjatradebuilder.cli \
   --packet tests/fixtures/packets.valid.json \
-  --contract ES
+  --contract ES \
+  --audit-log ./logs/ninjatradebuilder.audit.jsonl
 ```
 
 - If `--packet` is already a single `historical_packet_v1` JSON object, omit `--contract`.
 - `--evaluation-timestamp` is optional. If omitted, the CLI uses `market_packet.timestamp`.
 - `--model` is optional. The default is `gemini-3.1-pro-preview`.
+- `--audit-log` is optional. When supplied, the CLI appends one JSON record per run.
 - Gemini requests are bounded by the centralized timeout and retry env vars above.
 
 Equivalent Python API form:
@@ -98,9 +100,10 @@ print(result.final_decision)
 - explicit final decision mapping at Stage D
 - clear startup failure when `GEMINI_API_KEY` is missing
 - bounded Gemini request policy with explicit timeout/retry behavior
+- optional local JSONL audit record for operator debugging
 
 ## What this path does not provide yet
 
-- persistence or audit logging
+- persistent audit sink beyond local JSONL operator logs
 - structured observability
 - deployment-specific handler for Netlify or other serverless targets

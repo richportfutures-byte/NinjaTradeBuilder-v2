@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 from ninjatradebuilder.cli import run_cli
@@ -105,6 +106,50 @@ def test_cli_runs_bundle_packet_and_prints_pipeline_json(monkeypatch) -> None:
     assert captured["prompt_id"] == 2
 
 
+def test_cli_writes_success_audit_record(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    audit_path = tmp_path / "audit.jsonl"
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    class FakeGeminiAdapter:
+        def __init__(self, *, client, model, timeout_seconds=None, max_retries=0):
+            self.client = client
+
+        def generate_structured(self, request):
+            return _valid_contract_analysis("ES", outcome="NO_TRADE")
+
+    monkeypatch.setattr("ninjatradebuilder.cli.GeminiResponsesAdapter", FakeGeminiAdapter)
+
+    exit_code = run_cli(
+        [
+            "--packet",
+            str(FIXTURES_DIR / "packets.valid.json"),
+            "--contract",
+            "ES",
+            "--audit-log",
+            str(audit_path),
+        ],
+        stdout=stdout,
+        stderr=stderr,
+        client_factory=lambda config: config,
+    )
+
+    assert exit_code == 0
+    assert stderr.getvalue() == ""
+    record = json.loads(audit_path.read_text().strip())
+    assert record["audit_schema"] == "operator_cli_run_v1"
+    assert record["contract"] == "ES"
+    assert record["model"] == "gemini-3.1-pro-preview"
+    assert record["timeout_seconds"] == 20
+    assert record["max_retries"] == 1
+    assert record["termination_stage"] == "contract_market_read"
+    assert record["final_decision"] == "NO_TRADE"
+    assert record["status"] == "success"
+    assert record["success"] is True
+    assert record["error_message"] is None
+
+
 def test_cli_rejects_bundle_packet_without_contract(monkeypatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     stdout = io.StringIO()
@@ -146,3 +191,36 @@ def test_cli_rejects_invalid_timeout_configuration(monkeypatch) -> None:
     assert exit_code == 2
     assert stdout.getvalue() == ""
     assert "NINJATRADEBUILDER_GEMINI_TIMEOUT_SECONDS must be >= 10." in stderr.getvalue()
+
+
+def test_cli_writes_failure_audit_record(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    audit_path = tmp_path / "audit.jsonl"
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run_cli(
+        [
+            "--packet",
+            str(FIXTURES_DIR / "packets.valid.json"),
+            "--contract",
+            "ES",
+            "--audit-log",
+            str(audit_path),
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "GEMINI_API_KEY is required for CLI execution." in stderr.getvalue()
+    record = json.loads(audit_path.read_text().strip())
+    assert record["contract"] == "ES"
+    assert record["status"] == "failure"
+    assert record["success"] is False
+    assert record["termination_stage"] is None
+    assert record["final_decision"] is None
+    assert record["error_category"] == "config_error"
+    assert record["error_type"] == "ConfigError"
+    assert "GEMINI_API_KEY is required for CLI execution." in record["error_message"]
