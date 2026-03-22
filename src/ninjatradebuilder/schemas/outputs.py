@@ -47,6 +47,53 @@ TerminationStage = Literal[
     "setup_construction",
     "risk_authorization",
 ]
+ReadinessTopLevelStatus = Literal[
+    "READY",
+    "WAIT_FOR_TRIGGER",
+    "LOCKED_OUT",
+    "INSUFFICIENT_DATA",
+]
+ReadinessDoctrineGate = Literal[
+    "data_sufficiency_gate",
+    "context_alignment_gate",
+    "structure_quality_gate",
+    "trigger_gate",
+    "risk_window_gate",
+    "lockout_gate",
+]
+ReadinessDoctrineGateState = Literal["PASS", "FAIL", "WAIT"]
+ReadinessWaitForTriggerReason = Literal[
+    "entry_not_yet_confirmed",
+    "pullback_not_complete",
+    "breakout_not_confirmed",
+    "timing_window_not_open",
+]
+ReadinessLockoutReason = Literal[
+    "event_lockout_active",
+    "session_closed",
+    "risk_hard_stop_active",
+    "governance_lock_active",
+]
+ReadinessInsufficientDataReason = Literal[
+    "missing_required_fields",
+    "stale_market_packet",
+    "incomplete_contract_extension",
+    "invalid_challenge_state",
+    "missing_trigger_context",
+]
+ReadinessTriggerFamily = Literal[
+    "recheck_at_time",
+    "price_level_touch",
+]
+
+READINESS_DOCTRINE_GATES: tuple[ReadinessDoctrineGate, ...] = (
+    "data_sufficiency_gate",
+    "context_alignment_gate",
+    "structure_quality_gate",
+    "trigger_gate",
+    "risk_window_gate",
+    "lockout_gate",
+)
 
 
 class EventLockoutDetail(StrictModel):
@@ -94,6 +141,185 @@ class SufficiencyGateOutput(StrictModel):
         elif self.event_lockout_detail is not None:
             raise ValueError(
                 "event_lockout_detail must only be populated when status is EVENT_LOCKOUT."
+            )
+        return self
+
+
+class ReadinessDoctrineGateResult(StrictModel):
+    gate: ReadinessDoctrineGate
+    state: ReadinessDoctrineGateState
+    rationale: str
+
+
+class ReadinessTriggerData(StrictModel):
+    family: ReadinessTriggerFamily
+    recheck_at_time: AwareDatetime | None = None
+    price_level: float | None = None
+
+    @model_validator(mode="after")
+    def validate_family_shape(self) -> "ReadinessTriggerData":
+        if self.family == "recheck_at_time":
+            if self.recheck_at_time is None:
+                raise ValueError(
+                    "recheck_at_time trigger_data requires recheck_at_time."
+                )
+            if self.price_level is not None:
+                raise ValueError(
+                    "recheck_at_time trigger_data must not include price_level."
+                )
+            return self
+
+        if self.price_level is None:
+            raise ValueError("price_level_touch trigger_data requires price_level.")
+        if self.recheck_at_time is not None:
+            raise ValueError(
+                "price_level_touch trigger_data must not include recheck_at_time."
+            )
+        return self
+
+
+class ReadinessEngineOutput(StrictModel):
+    schema_name: Literal["readiness_engine_output_v1"] = Field(
+        default="readiness_engine_output_v1",
+        alias="$schema",
+    )
+    stage: Literal["readiness_engine"] = "readiness_engine"
+    authority: Literal["ESCALATE_ONLY"] = "ESCALATE_ONLY"
+    contract: ContractSymbol
+    timestamp: AwareDatetime
+    status: ReadinessTopLevelStatus
+    doctrine_gates: list[ReadinessDoctrineGateResult]
+    trigger_data: ReadinessTriggerData | None = None
+    wait_for_trigger_reason: ReadinessWaitForTriggerReason | None = None
+    lockout_reason: ReadinessLockoutReason | None = None
+    insufficient_data_reasons: list[ReadinessInsufficientDataReason] = Field(
+        default_factory=list
+    )
+    missing_inputs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_status_and_gate_non_interchangeability(self) -> "ReadinessEngineOutput":
+        if len(self.doctrine_gates) != len(READINESS_DOCTRINE_GATES):
+            raise ValueError("doctrine_gates must contain exactly one result for each doctrine gate.")
+
+        gate_map: dict[ReadinessDoctrineGate, ReadinessDoctrineGateState] = {}
+        for result in self.doctrine_gates:
+            if result.gate in gate_map:
+                raise ValueError(f"doctrine_gates contains duplicate gate: {result.gate}.")
+            gate_map[result.gate] = result.state
+
+        missing = [gate for gate in READINESS_DOCTRINE_GATES if gate not in gate_map]
+        if missing:
+            raise ValueError(
+                f"doctrine_gates missing required gates: {', '.join(missing)}."
+            )
+
+        if self.trigger_data is None:
+            if (
+                self.status != "INSUFFICIENT_DATA"
+                or "missing_trigger_context" not in self.insufficient_data_reasons
+            ):
+                raise ValueError(
+                    "Missing trigger_data must fail closed as INSUFFICIENT_DATA "
+                    "with insufficient_data_reasons including missing_trigger_context."
+                )
+        elif (
+            self.status == "INSUFFICIENT_DATA"
+            and "missing_trigger_context" in self.insufficient_data_reasons
+        ):
+            raise ValueError(
+                "missing_trigger_context is invalid when trigger_data is present."
+            )
+
+        if self.status == "READY":
+            if any(state != "PASS" for state in gate_map.values()):
+                raise ValueError("READY requires all doctrine_gates states to be PASS.")
+            if (
+                self.wait_for_trigger_reason is not None
+                or self.lockout_reason is not None
+                or self.insufficient_data_reasons
+                or self.missing_inputs
+            ):
+                raise ValueError(
+                    "READY must not include wait_for_trigger_reason, lockout_reason, "
+                    "insufficient_data_reasons, or missing_inputs."
+                )
+            return self
+
+        if self.status == "WAIT_FOR_TRIGGER":
+            if gate_map["trigger_gate"] != "WAIT":
+                raise ValueError(
+                    "WAIT_FOR_TRIGGER requires doctrine_gates.trigger_gate state = WAIT."
+                )
+            for gate in (
+                "data_sufficiency_gate",
+                "context_alignment_gate",
+                "structure_quality_gate",
+                "risk_window_gate",
+                "lockout_gate",
+            ):
+                if gate_map[gate] != "PASS":
+                    raise ValueError(
+                        "WAIT_FOR_TRIGGER requires all non-trigger doctrine_gates to be PASS."
+                    )
+            if self.wait_for_trigger_reason is None:
+                raise ValueError("WAIT_FOR_TRIGGER requires wait_for_trigger_reason.")
+            if self.lockout_reason is not None or self.insufficient_data_reasons or self.missing_inputs:
+                raise ValueError(
+                    "WAIT_FOR_TRIGGER must not include lockout_reason, "
+                    "insufficient_data_reasons, or missing_inputs."
+                )
+            return self
+
+        if self.status == "LOCKED_OUT":
+            if gate_map["lockout_gate"] != "FAIL":
+                raise ValueError("LOCKED_OUT requires doctrine_gates.lockout_gate state = FAIL.")
+            for gate in (
+                "data_sufficiency_gate",
+                "context_alignment_gate",
+                "structure_quality_gate",
+                "trigger_gate",
+                "risk_window_gate",
+            ):
+                if gate_map[gate] != "PASS":
+                    raise ValueError(
+                        "LOCKED_OUT requires all non-lockout doctrine_gates to be PASS."
+                    )
+            if self.lockout_reason is None:
+                raise ValueError("LOCKED_OUT requires lockout_reason.")
+            if (
+                self.wait_for_trigger_reason is not None
+                or self.insufficient_data_reasons
+                or self.missing_inputs
+            ):
+                raise ValueError(
+                    "LOCKED_OUT must not include wait_for_trigger_reason, "
+                    "insufficient_data_reasons, or missing_inputs."
+                )
+            return self
+
+        if gate_map["data_sufficiency_gate"] != "FAIL":
+            raise ValueError(
+                "INSUFFICIENT_DATA requires doctrine_gates.data_sufficiency_gate state = FAIL."
+            )
+        for gate in (
+            "context_alignment_gate",
+            "structure_quality_gate",
+            "trigger_gate",
+            "risk_window_gate",
+            "lockout_gate",
+        ):
+            if gate_map[gate] != "PASS":
+                raise ValueError(
+                    "INSUFFICIENT_DATA requires all non-data-sufficiency doctrine_gates to be PASS."
+                )
+        if not self.insufficient_data_reasons:
+            raise ValueError("INSUFFICIENT_DATA requires insufficient_data_reasons.")
+        if not self.missing_inputs:
+            raise ValueError("INSUFFICIENT_DATA requires missing_inputs.")
+        if self.wait_for_trigger_reason is not None or self.lockout_reason is not None:
+            raise ValueError(
+                "INSUFFICIENT_DATA must not include wait_for_trigger_reason or lockout_reason."
             )
         return self
 
