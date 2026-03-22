@@ -10,6 +10,7 @@ from wsgiref.simple_server import make_server
 from .cli import _build_client, _normalize_for_json
 from .config import DEFAULT_GEMINI_MODEL, ConfigError, GeminiStartupConfig, load_gemini_startup_config
 from .gemini_adapter import GeminiAdapterError, GeminiResponsesAdapter
+from .readiness_adapter import build_readiness_runtime_inputs_from_packet
 from .runtime import run_readiness
 
 ClientFactory = Callable[[GeminiStartupConfig], Any]
@@ -34,9 +35,17 @@ READINESS_HTML = """<!doctype html>
   </head>
   <body>
     <h1>Readiness Engine</h1>
-    <p>Paste or load a readiness runtime input JSON file and a readiness trigger JSON file, then submit to the local readiness endpoint.</p>
+    <p>Paste or load either packet JSON or readiness runtime input JSON, plus readiness trigger JSON, then submit to the local readiness endpoint.</p>
     <form id="readiness-form">
       <div class="grid">
+        <div>
+          <label for="packet-file">Packet File</label>
+          <input id="packet-file" type="file" accept=".json,application/json">
+        </div>
+        <div>
+          <label for="packet-text">Packet JSON</label>
+          <textarea id="packet-text" spellcheck="false"></textarea>
+        </div>
         <div>
           <label for="runtime-input-file">Runtime Input File</label>
           <input id="runtime-input-file" type="file" accept=".json,application/json">
@@ -75,6 +84,7 @@ READINESS_HTML = """<!doctype html>
         });
       }
 
+      wireFileInput("packet-file", "packet-text");
       wireFileInput("runtime-input-file", "runtime-input-text");
       wireFileInput("trigger-file", "trigger-text");
 
@@ -84,15 +94,21 @@ READINESS_HTML = """<!doctype html>
         responseOutput.className = "";
 
         try {
-          const runtimeInputs = JSON.parse(document.getElementById("runtime-input-text").value);
+          const packetText = document.getElementById("packet-text").value.trim();
+          const runtimeInputText = document.getElementById("runtime-input-text").value.trim();
           const readinessTrigger = JSON.parse(document.getElementById("trigger-text").value);
+          const requestPayload = {
+            readiness_trigger: readinessTrigger
+          };
+          if (packetText) {
+            requestPayload.packet = JSON.parse(packetText);
+          } else {
+            requestPayload.runtime_inputs = JSON.parse(runtimeInputText);
+          }
           const response = await fetch("/api/readiness", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              runtime_inputs: runtimeInputs,
-              readiness_trigger: readinessTrigger
-            })
+            body: JSON.stringify(requestPayload)
           });
           const payload = await response.json();
           responseOutput.textContent = JSON.stringify(payload, null, 2);
@@ -186,11 +202,20 @@ def build_readiness_web_app(
             try:
                 payload = _read_request_json(environ)
                 runtime_inputs = payload.get("runtime_inputs")
+                packet = payload.get("packet")
                 readiness_trigger = payload.get("readiness_trigger")
-                if not isinstance(runtime_inputs, Mapping):
-                    raise ValueError("runtime_inputs must be a JSON object.")
                 if not isinstance(readiness_trigger, Mapping):
                     raise ValueError("readiness_trigger must be a JSON object.")
+                if (runtime_inputs is None) == (packet is None):
+                    raise ValueError(
+                        "Request must include exactly one of runtime_inputs or packet."
+                    )
+                if packet is not None:
+                    if not isinstance(packet, Mapping):
+                        raise ValueError("packet must be a JSON object.")
+                    runtime_inputs = build_readiness_runtime_inputs_from_packet(packet)
+                elif not isinstance(runtime_inputs, Mapping):
+                    raise ValueError("runtime_inputs must be a JSON object.")
 
                 config = load_gemini_startup_config(model=model)
                 adapter = GeminiResponsesAdapter(
