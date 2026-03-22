@@ -1,5 +1,0 @@
-google-genai<2,>=1.0
-pydantic<3,>=2.8
-
-[dev]
-pytest<9,>=8
