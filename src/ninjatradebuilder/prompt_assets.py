@@ -509,12 +509,18 @@ RUNTIME INPUTS:
 <<attached_visuals_json>>
 - readiness_trigger JSON:
 <<readiness_trigger_json>>
+- watchman_context JSON:
+<<watchman_context_json>>
 
 READINESS AUTHORITY RULES:
 - This is a standalone readiness surface and is non-interchangeable with Stage A+B and Stage C outputs.
 - This stage has escalation authority only. It does not authorize trades and must never emit risk_authorization output.
 - Supported trigger families for v1 only: recheck_at_time, price_level_touch.
 - If trigger family is unsupported or trigger payload is malformed, fail closed and return INSUFFICIENT_DATA using missing_trigger_context semantics.
+- Use watchman_context as the deterministic pre-LLM market-awareness substrate for readiness.
+- If watchman_context.hard_lockout_flags is non-empty, that is direct lockout evidence.
+- If watchman_context.missing_inputs is non-empty, fail closed as INSUFFICIENT_DATA.
+- Use watchman_context.rationales and awareness_flags to explain doctrine gate states. Do not invent context beyond that deterministic substrate.
 
 STATUS RULES:
 - READY: all doctrine gates PASS.
@@ -542,6 +548,7 @@ READINESS_PROMPT_ASSET = PromptAsset(
         "contract_specific_extension_json",
         "attached_visuals_json",
         "readiness_trigger_json",
+        "watchman_context_json",
     ),
     template=PROMPT_10_READINESS_ENGINE,
 )

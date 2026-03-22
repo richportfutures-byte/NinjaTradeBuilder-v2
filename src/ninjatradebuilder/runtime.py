@@ -18,6 +18,7 @@ from .schemas.outputs import (
     RiskAuthorization,
     SufficiencyGateOutput,
 )
+from .watchman import build_watchman_context_json_from_runtime_inputs
 
 ValidatedOutput = (
     SufficiencyGateOutput
@@ -274,8 +275,13 @@ def run_readiness(
     model_adapter: StructuredModelAdapter,
 ) -> PromptExecutionResult:
     normalized_runtime_inputs = dict(runtime_inputs)
-    normalized_runtime_inputs["readiness_trigger_json"] = _normalize_readiness_trigger(
-        readiness_trigger
+    normalized_trigger = _normalize_readiness_trigger(readiness_trigger)
+    normalized_runtime_inputs["readiness_trigger_json"] = normalized_trigger
+    normalized_runtime_inputs["watchman_context_json"] = (
+        build_watchman_context_json_from_runtime_inputs(
+            normalized_runtime_inputs,
+            normalized_trigger,
+        )
     )
 
     result = execute_prompt(

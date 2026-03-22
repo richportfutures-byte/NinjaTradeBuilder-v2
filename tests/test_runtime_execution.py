@@ -324,6 +324,9 @@ def test_run_readiness_executes_end_to_end_for_zn_golden_paths(
     assert adapter.calls[0].schema_model_names == ("ReadinessEngineOutput",)
     assert '"contract": "ZN"' in result.rendered_prompt
     assert expected_prompt_fragment in result.rendered_prompt
+    assert "watchman_context JSON:" in result.rendered_prompt
+    assert '"contract_specific_macro_state": "auction_sensitive"' in result.rendered_prompt
+    assert '"session_wind_down_state": "normal"' in result.rendered_prompt
 
 
 def test_successful_shared_prompt_execution_returns_typed_result() -> None:

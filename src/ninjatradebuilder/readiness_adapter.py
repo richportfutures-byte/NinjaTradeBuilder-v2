@@ -6,14 +6,14 @@ from typing import Any
 from .prompt_assets import MASTER_DOCTRINE_TEMPLATE
 from .validation import validate_historical_packet
 
-SUPPORTED_PACKET_READINESS_CONTRACTS = ("ES", "ZN")
+SUPPORTED_PACKET_READINESS_CONTRACTS = ("ES", "NQ", "CL", "ZN", "6E", "MGC")
 
 
 def build_readiness_runtime_inputs_from_packet(packet_payload: Mapping[str, Any]) -> dict[str, Any]:
     packet = validate_historical_packet(packet_payload)
     if packet.market_packet.contract not in SUPPORTED_PACKET_READINESS_CONTRACTS:
         raise ValueError(
-            "Packet-backed readiness conversion is currently supported for ES and ZN only."
+            "Packet-backed readiness conversion is currently supported for ES, NQ, CL, ZN, 6E, and MGC only."
         )
 
     return {

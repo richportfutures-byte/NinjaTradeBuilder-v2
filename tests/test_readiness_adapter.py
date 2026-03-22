@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from ninjatradebuilder.readiness_adapter import build_readiness_runtime_inputs_from_packet
+from ninjatradebuilder.readiness_adapter import (
+    SUPPORTED_PACKET_READINESS_CONTRACTS,
+    build_readiness_runtime_inputs_from_packet,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -23,33 +26,43 @@ def _packet_payload(contract: str) -> dict:
     }
 
 
-def test_build_readiness_runtime_inputs_from_valid_zn_packet() -> None:
-    runtime_inputs = build_readiness_runtime_inputs_from_packet(_packet_payload("ZN"))
+@pytest.mark.parametrize(
+    ("contract", "expected_max_size", "expected_timestamp"),
+    [
+        ("ZN", 4, "2026-01-14T15:05:00Z"),
+        ("ES", 2, "2026-01-14T15:05:00Z"),
+        ("NQ", 2, "2026-01-14T15:05:00Z"),
+        ("CL", 2, "2026-01-14T14:05:00Z"),
+        ("6E", 4, "2026-01-14T14:05:00Z"),
+        ("MGC", 12, "2026-01-14T15:05:00Z"),
+    ],
+)
+def test_build_readiness_runtime_inputs_from_supported_packet(
+    contract: str,
+    expected_max_size: int,
+    expected_timestamp: str,
+) -> None:
+    runtime_inputs = build_readiness_runtime_inputs_from_packet(_packet_payload(contract))
 
-    assert runtime_inputs["evaluation_timestamp_iso"] == "2026-01-14T15:05:00Z"
-    assert runtime_inputs["contract_metadata_json"]["contract"] == "ZN"
-    assert runtime_inputs["market_packet_json"]["contract"] == "ZN"
-    assert runtime_inputs["contract_specific_extension_json"]["contract"] == "ZN"
-    assert runtime_inputs["challenge_state_json"]["max_position_size_by_contract"]["ZN"] == 4
-    assert "MASTER DOCTRINE" in runtime_inputs["master_doctrine_text"]
-
-
-def test_build_readiness_runtime_inputs_from_valid_es_packet() -> None:
-    runtime_inputs = build_readiness_runtime_inputs_from_packet(_packet_payload("ES"))
-
-    assert runtime_inputs["evaluation_timestamp_iso"] == "2026-01-14T15:05:00Z"
-    assert runtime_inputs["contract_metadata_json"]["contract"] == "ES"
-    assert runtime_inputs["market_packet_json"]["contract"] == "ES"
-    assert runtime_inputs["contract_specific_extension_json"]["contract"] == "ES"
-    assert runtime_inputs["challenge_state_json"]["max_position_size_by_contract"]["ES"] == 2
+    assert runtime_inputs["evaluation_timestamp_iso"] == expected_timestamp
+    assert runtime_inputs["contract_metadata_json"]["contract"] == contract
+    assert runtime_inputs["market_packet_json"]["contract"] == contract
+    assert runtime_inputs["contract_specific_extension_json"]["contract"] == contract
+    assert runtime_inputs["challenge_state_json"]["max_position_size_by_contract"][contract] == expected_max_size
     assert "MASTER DOCTRINE" in runtime_inputs["master_doctrine_text"]
 
 
 def test_build_readiness_runtime_inputs_rejects_unsupported_contract() -> None:
-    with pytest.raises(ValueError) as exc_info:
-        build_readiness_runtime_inputs_from_packet(_packet_payload("CL"))
+    invalid_packet = copy.deepcopy(_packet_payload("MGC"))
+    invalid_packet["contract_metadata"]["contract"] = "GC"
+    invalid_packet["market_packet"]["contract"] = "GC"
+    invalid_packet["contract_specific_extension"]["contract"] = "GC"
 
-    assert "ES and ZN only" in str(exc_info.value)
+    with pytest.raises(ValueError) as exc_info:
+        build_readiness_runtime_inputs_from_packet(invalid_packet)
+
+    message = str(exc_info.value)
+    assert "GC" in message or "MGC" in message or "ContractSymbol" in message
 
 
 def test_build_readiness_runtime_inputs_rejects_malformed_packet() -> None:
@@ -60,10 +73,14 @@ def test_build_readiness_runtime_inputs_rejects_malformed_packet() -> None:
 
 
 def test_build_readiness_runtime_inputs_rejects_missing_required_fields() -> None:
-    invalid_packet = copy.deepcopy(_packet_payload("ZN"))
-    invalid_packet["market_packet"].pop("current_price")
+    invalid_packet = copy.deepcopy(_packet_payload("6E"))
+    invalid_packet["contract_specific_extension"].pop("europe_initiative_status")
 
     with pytest.raises(ValueError) as exc_info:
         build_readiness_runtime_inputs_from_packet(invalid_packet)
 
-    assert "current_price" in str(exc_info.value)
+    assert "europe_initiative_status" in str(exc_info.value)
+
+
+def test_supported_packet_readiness_contracts_are_frozen() -> None:
+    assert SUPPORTED_PACKET_READINESS_CONTRACTS == ("ES", "NQ", "CL", "ZN", "6E", "MGC")

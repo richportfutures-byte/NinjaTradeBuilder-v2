@@ -34,12 +34,15 @@ def _packet_payload(contract: str) -> dict[str, Any]:
 
 
 def _expected_readiness_output(contract: str) -> dict[str, Any]:
+    timestamp = "2026-01-14T15:05:00Z"
+    if contract in {"CL", "6E"}:
+        timestamp = "2026-01-14T14:05:00Z"
     return {
         "$schema": "readiness_engine_output_v1",
         "stage": "readiness_engine",
         "authority": "ESCALATE_ONLY",
         "contract": contract,
-        "timestamp": "2026-01-14T15:05:00Z",
+        "timestamp": timestamp,
         "status": "WAIT_FOR_TRIGGER",
         "doctrine_gates": [
             {
@@ -119,6 +122,7 @@ def test_readiness_web_endpoint_executes_zn_fixture_path(monkeypatch) -> None:
 
         def generate_structured(self, request):
             captured_adapter["prompt_id"] = request.prompt_id
+            captured_adapter["rendered_prompt"] = request.rendered_prompt
             return expected_output
 
     monkeypatch.setattr("ninjatradebuilder.readiness_web.GeminiResponsesAdapter", FakeGeminiAdapter)
@@ -144,6 +148,7 @@ def test_readiness_web_endpoint_executes_zn_fixture_path(monkeypatch) -> None:
     assert json.loads(response_body.decode("utf-8")) == expected_output
     assert captured_adapter["client"].api_key == "test-key"
     assert captured_adapter["prompt_id"] == 10
+    assert '"contract_specific_macro_state": "auction_sensitive"' in captured_adapter["rendered_prompt"]
 
 
 def test_readiness_web_endpoint_accepts_zn_packet_input(monkeypatch) -> None:
@@ -159,6 +164,7 @@ def test_readiness_web_endpoint_accepts_zn_packet_input(monkeypatch) -> None:
 
         def generate_structured(self, request):
             captured_adapter["prompt_id"] = request.prompt_id
+            captured_adapter["rendered_prompt"] = request.rendered_prompt
             return expected_output
 
     monkeypatch.setattr("ninjatradebuilder.readiness_web.GeminiResponsesAdapter", FakeGeminiAdapter)
@@ -184,6 +190,7 @@ def test_readiness_web_endpoint_accepts_zn_packet_input(monkeypatch) -> None:
     assert json.loads(response_body.decode("utf-8")) == expected_output
     assert captured_adapter["client"].api_key == "test-key"
     assert captured_adapter["prompt_id"] == 10
+    assert '"contract_specific_macro_state": "auction_sensitive"' in captured_adapter["rendered_prompt"]
 
 
 def test_readiness_web_endpoint_accepts_es_packet_input(monkeypatch) -> None:
@@ -199,6 +206,7 @@ def test_readiness_web_endpoint_accepts_es_packet_input(monkeypatch) -> None:
 
         def generate_structured(self, request):
             captured_adapter["prompt_id"] = request.prompt_id
+            captured_adapter["rendered_prompt"] = request.rendered_prompt
             return expected_output
 
     monkeypatch.setattr("ninjatradebuilder.readiness_web.GeminiResponsesAdapter", FakeGeminiAdapter)
@@ -224,3 +232,88 @@ def test_readiness_web_endpoint_accepts_es_packet_input(monkeypatch) -> None:
     assert json.loads(response_body.decode("utf-8")) == expected_output
     assert captured_adapter["client"].api_key == "test-key"
     assert captured_adapter["prompt_id"] == 10
+    assert '"contract_specific_macro_state": "breadth_cash_delta_aligned"' in captured_adapter["rendered_prompt"]
+
+
+def test_readiness_web_endpoint_accepts_nq_packet_input(monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    packet = _packet_payload("NQ")
+    readiness_trigger = json.loads((FIXTURES_DIR / "zn_recheck_trigger.valid.json").read_text())
+    expected_output = _expected_readiness_output("NQ")
+    captured_adapter: dict[str, Any] = {}
+
+    class FakeGeminiAdapter:
+        def __init__(self, *, client, model, timeout_seconds=None, max_retries=0):
+            captured_adapter["client"] = client
+
+        def generate_structured(self, request):
+            captured_adapter["prompt_id"] = request.prompt_id
+            captured_adapter["rendered_prompt"] = request.rendered_prompt
+            return expected_output
+
+    monkeypatch.setattr("ninjatradebuilder.readiness_web.GeminiResponsesAdapter", FakeGeminiAdapter)
+
+    app = build_readiness_web_app(client_factory=lambda config: config)
+    request_body = json.dumps(
+        {
+            "packet": packet,
+            "readiness_trigger": readiness_trigger,
+        }
+    ).encode("utf-8")
+    environ = {
+        "REQUEST_METHOD": "POST",
+        "PATH_INFO": "/api/readiness",
+        "CONTENT_LENGTH": str(len(request_body)),
+        "wsgi.input": io.BytesIO(request_body),
+    }
+    response_capture, start_response = _start_response_capture()
+
+    response_body = b"".join(app(environ, start_response))
+
+    assert response_capture["status"] == "200 OK"
+    assert json.loads(response_body.decode("utf-8")) == expected_output
+    assert captured_adapter["client"].api_key == "test-key"
+    assert captured_adapter["prompt_id"] == 10
+    assert '"contract_specific_macro_state": "relative_strength_leader"' in captured_adapter["rendered_prompt"]
+
+
+def test_readiness_web_endpoint_accepts_cl_packet_input(monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    packet = _packet_payload("CL")
+    readiness_trigger = json.loads((FIXTURES_DIR / "zn_recheck_trigger.valid.json").read_text())
+    expected_output = _expected_readiness_output("CL")
+    captured_adapter: dict[str, Any] = {}
+
+    class FakeGeminiAdapter:
+        def __init__(self, *, client, model, timeout_seconds=None, max_retries=0):
+            captured_adapter["client"] = client
+
+        def generate_structured(self, request):
+            captured_adapter["prompt_id"] = request.prompt_id
+            captured_adapter["rendered_prompt"] = request.rendered_prompt
+            return expected_output
+
+    monkeypatch.setattr("ninjatradebuilder.readiness_web.GeminiResponsesAdapter", FakeGeminiAdapter)
+
+    app = build_readiness_web_app(client_factory=lambda config: config)
+    request_body = json.dumps(
+        {
+            "packet": packet,
+            "readiness_trigger": readiness_trigger,
+        }
+    ).encode("utf-8")
+    environ = {
+        "REQUEST_METHOD": "POST",
+        "PATH_INFO": "/api/readiness",
+        "CONTENT_LENGTH": str(len(request_body)),
+        "wsgi.input": io.BytesIO(request_body),
+    }
+    response_capture, start_response = _start_response_capture()
+
+    response_body = b"".join(app(environ, start_response))
+
+    assert response_capture["status"] == "200 OK"
+    assert json.loads(response_body.decode("utf-8")) == expected_output
+    assert captured_adapter["client"].api_key == "test-key"
+    assert captured_adapter["prompt_id"] == 10
+    assert '"contract_specific_macro_state": "eia_sensitive"' in captured_adapter["rendered_prompt"]
