@@ -364,6 +364,8 @@ def test_prompt_2_schema_hint_hardens_sufficiency_gate_shape() -> None:
     assert "always emit the full schema object" in payload_description
     assert "contract, timestamp, status, missing_inputs, disqualifiers" in payload_description
     assert "staleness_check must be an object" in payload_description
+    assert "event_lockout_detail must be an object with exactly event_name, event_time, minutes_until, and lockout_type" in payload_description
+    assert "must still use the field name minutes_until rather than minutes_since" in payload_description
     assert "Do not emit shorthand fields such as reason or missing_fields" in payload_description
     assert "If the Stage A status is READY, continue to Stage B and return contract_analysis" in payload_description
     assert "outcome must be ANALYSIS_COMPLETE or NO_TRADE only, never READY" in payload_description
@@ -756,6 +758,32 @@ def test_live_like_stage_a_string_staleness_check_is_rejected() -> None:
     message = str(exc_info.value)
     assert "staleness_check" in message
     assert "valid dictionary" in message
+
+
+def test_live_like_stage_a_post_event_lockout_shape_drift_is_rejected() -> None:
+    invalid_payload = _valid_sufficiency_gate_output("ZN", status="EVENT_LOCKOUT")
+    invalid_payload["disqualifiers"] = ["macro_release_lockout"]
+    invalid_payload["event_lockout_detail"] = {
+        "event_name": "CPI",
+        "event_time": "2026-01-14T13:30:00Z",
+        "minutes_since": 2,
+        "lockout_threshold_minutes": 5,
+    }
+    client = FakeGeminiClient(_envelope("sufficiency_gate_output", invalid_payload))
+    adapter = GeminiResponsesAdapter(client=client, model="gemini-3.1-pro-preview")
+
+    with pytest.raises(ValueError) as exc_info:
+        execute_prompt(
+            prompt_id=5,
+            runtime_inputs=_stage_ab_inputs("ZN"),
+            model_adapter=adapter,
+        )
+
+    message = str(exc_info.value)
+    assert "event_lockout_detail.minutes_until" in message
+    assert "event_lockout_detail.lockout_type" in message
+    assert "event_lockout_detail.minutes_since" in message
+    assert "event_lockout_detail.lockout_threshold_minutes" in message
 
 
 def test_live_like_stage_b_hybrid_payload_after_ready_gate_is_rejected() -> None:

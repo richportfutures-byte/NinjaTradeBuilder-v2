@@ -93,6 +93,8 @@ def test_all_stage_ab_prompts_include_shared_correction_anchors() -> None:
         assert "If conflicting_signals contains >= 2 entries, evidence_score must not exceed 6." in rendered
         assert "If conflicting_signals contains >= 3 entries, evidence_score must not exceed 4." in rendered
         assert "Every claim in structural_notes must reference at least one specific field" in rendered
+        assert "event_lockout_detail must be the exact schema object" in rendered
+        assert "Even for post-event lockout, use the schema field name minutes_until" in rendered
 
 
 def test_contract_specific_prompt_corrections_are_present() -> None:

@@ -147,6 +147,7 @@ Part 1 output: sufficiency_gate_output JSON only. If status != READY, stop and d
 - For NEED_INPUT, put missing fields in missing_inputs and leave disqualifiers as an empty list unless another disqualifier also applies.
 - For INSUFFICIENT_DATA, populate disqualifiers and still include missing_inputs as a list, even if empty.
 - For EVENT_LOCKOUT, populate disqualifiers and event_lockout_detail and still include missing_inputs, staleness_check, and challenge_state_valid.
+- event_lockout_detail must be the exact schema object with only: event_name, event_time, minutes_until, and lockout_type. lockout_type must be exactly pre_event or post_event. Even for post-event lockout, use the schema field name minutes_until for the lockout distance value. Do not emit minutes_since, lockout_threshold_minutes, threshold_minutes, or any alternate event_lockout_detail shape.
 - Do not emit shorthand fields such as reason, missing_fields, or any alternate summary-only shape.
 - If Part 1 status = READY, do not stop and do not return sufficiency_gate_output as the final answer. Continue to Part 2 and return contract_analysis JSON only.
 
