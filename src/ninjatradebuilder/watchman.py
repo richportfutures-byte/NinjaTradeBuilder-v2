@@ -40,14 +40,32 @@ TriggerContextState = Literal[
     "below_trigger_level",
     "at_trigger_level",
 ]
+LevelProximityState = Literal[
+    "near_prior_day_level",
+    "near_overnight_level",
+    "near_previous_session_value_level",
+    "near_major_htf_level",
+    "near_key_hvn_lvn",
+    "clear_of_structure",
+]
 ValueLocationState = Literal["above_value", "inside_value", "below_value"]
 VisualReadinessState = Literal["sufficient", "partial", "insufficient"]
 VolumeParticipationState = Literal["elevated", "normal", "subdued"]
+VwapPostureState = Literal["price_above_vwap", "price_below_vwap", "price_at_vwap"]
 
 ET_TZ = ZoneInfo("America/New_York")
 WATCHMAN_STALENESS_THRESHOLD_SECONDS = 300
 WATCHMAN_WIND_DOWN_MINUTES = 30
 WATCHMAN_EVENT_ELEVATED_WINDOW_MINUTES = 30
+SIXE_LONDON_CLOSE_THINNING_START_ET: str = "11:30"
+LEVEL_PROXIMITY_THRESHOLD_TICKS: dict[str, int] = {
+    "ES": 16,
+    "NQ": 16,
+    "CL": 20,
+    "ZN": 8,
+    "6E": 20,
+    "MGC": 20,
+}
 
 REQUIRED_WATCHMAN_RUNTIME_INPUT_SLOTS: tuple[str, ...] = (
     "evaluation_timestamp_iso",
@@ -57,6 +75,12 @@ REQUIRED_WATCHMAN_RUNTIME_INPUT_SLOTS: tuple[str, ...] = (
     "contract_specific_extension_json",
     "attached_visuals_json",
 )
+
+
+class TriggerProximity(StrictModel):
+    trigger_family: str
+    price_distance_ticks: float | None = None
+    time_distance_minutes: float | None = None
 
 
 class WatchmanReadinessContext(StrictModel):
@@ -69,11 +93,14 @@ class WatchmanReadinessContext(StrictModel):
     staleness_state: StalenessState
     visual_readiness_state: VisualReadinessState
     value_location_state: ValueLocationState
+    vwap_posture_state: VwapPostureState
+    level_proximity_state: LevelProximityState
     opening_state: OpeningState
     range_expansion_state: RangeExpansionState
     volume_participation_state: VolumeParticipationState
     delta_agreement_state: DeltaAgreementState
     trigger_context_state: TriggerContextState
+    trigger_proximity: TriggerProximity
     contract_specific_macro_state: ContractSpecificMacroState
     hard_lockout_flags: list[str]
     awareness_flags: list[str]
@@ -161,6 +188,15 @@ def build_watchman_context_from_runtime_inputs(
         f"{value_location_state.replace('_', ' ')} relative to the developing value area."
     )
 
+    vwap_posture_state = _classify_vwap_posture(packet)
+    rationales["vwap_posture_state"] = (
+        f"Current price {packet.market_packet.current_price} is "
+        f"{vwap_posture_state.replace('_', ' ')} relative to VWAP {packet.market_packet.vwap} "
+        f"with half-tick threshold {packet.contract_metadata.tick_size / 2:.4f}."
+    )
+    level_proximity_state, level_proximity_rationale = _classify_level_proximity(packet)
+    rationales["level_proximity_state"] = level_proximity_rationale
+
     opening_state = _classify_opening_state(packet)
     rationales["opening_state"] = (
         f"Opening type is {packet.market_packet.opening_type}."
@@ -193,6 +229,11 @@ def build_watchman_context_from_runtime_inputs(
         evaluation_timestamp,
         normalized_trigger,
     )
+    trigger_proximity = _compute_trigger_proximity(
+        packet,
+        evaluation_timestamp,
+        normalized_trigger,
+    )
     rationales["trigger_context_state"] = _trigger_rationale(
         packet,
         evaluation_timestamp,
@@ -215,6 +256,7 @@ def build_watchman_context_from_runtime_inputs(
         awareness_flags,
         rationales,
     )
+    missing_inputs = _collect_missing_inputs(packet)
 
     return WatchmanReadinessContext(
         contract=packet.market_packet.contract,
@@ -226,15 +268,18 @@ def build_watchman_context_from_runtime_inputs(
         staleness_state=staleness_state,
         visual_readiness_state=visual_readiness_state,
         value_location_state=value_location_state,
+        vwap_posture_state=vwap_posture_state,
+        level_proximity_state=level_proximity_state,
         opening_state=opening_state,
         range_expansion_state=range_expansion_state,
         volume_participation_state=volume_participation_state,
         delta_agreement_state=delta_agreement_state,
         trigger_context_state=trigger_context_state,
+        trigger_proximity=trigger_proximity,
         contract_specific_macro_state=contract_specific_macro_state,
         hard_lockout_flags=sorted(hard_lockout_flags),
         awareness_flags=sorted(awareness_flags),
-        missing_inputs=[],
+        missing_inputs=missing_inputs,
         rationales=rationales,
     )
 
@@ -382,6 +427,149 @@ def _classify_value_location(packet: HistoricalPacket) -> ValueLocationState:
     return "inside_value"
 
 
+def _classify_vwap_posture(packet: HistoricalPacket) -> VwapPostureState:
+    current_price = packet.market_packet.current_price
+    vwap = packet.market_packet.vwap
+    half_tick = packet.contract_metadata.tick_size / 2
+    distance = abs(current_price - vwap)
+
+    if distance <= half_tick:
+        return "price_at_vwap"
+    if current_price > vwap:
+        return "price_above_vwap"
+    return "price_below_vwap"
+
+
+def _classify_level_proximity(packet: HistoricalPacket) -> tuple[LevelProximityState, str]:
+    current_price = packet.market_packet.current_price
+    contract = packet.market_packet.contract
+    tick_size = packet.contract_metadata.tick_size
+    threshold_ticks = LEVEL_PROXIMITY_THRESHOLD_TICKS[contract]
+    threshold_price = threshold_ticks * tick_size
+
+    def _match_tier(
+        state: LevelProximityState,
+        levels: list[tuple[str, float]],
+    ) -> tuple[LevelProximityState, str] | None:
+        closest_match: tuple[str, float, float] | None = None
+        for level_name, level_value in levels:
+            distance_price = abs(current_price - level_value)
+            if distance_price > threshold_price:
+                continue
+            distance_ticks = distance_price / tick_size
+            if closest_match is None or distance_ticks < closest_match[2]:
+                closest_match = (level_name, level_value, distance_ticks)
+        if closest_match is None:
+            return None
+        level_name, level_value, distance_ticks = closest_match
+        return (
+            state,
+            f"Current price {current_price} is {distance_ticks:.1f} ticks from "
+            f"{level_name} {level_value} (threshold: {threshold_ticks} ticks).",
+        )
+
+    tiers: tuple[tuple[LevelProximityState, list[tuple[str, float]]], ...] = (
+        (
+            "near_prior_day_level",
+            [
+                ("prior_day_high", packet.market_packet.prior_day_high),
+                ("prior_day_low", packet.market_packet.prior_day_low),
+            ],
+        ),
+        (
+            "near_overnight_level",
+            [
+                ("overnight_high", packet.market_packet.overnight_high),
+                ("overnight_low", packet.market_packet.overnight_low),
+            ],
+        ),
+        (
+            "near_previous_session_value_level",
+            [
+                ("previous_session_vah", packet.market_packet.previous_session_vah),
+                ("previous_session_val", packet.market_packet.previous_session_val),
+                ("previous_session_poc", packet.market_packet.previous_session_poc),
+            ],
+        ),
+        (
+            "near_major_htf_level",
+            [
+                ("major_higher_timeframe_levels", level)
+                for level in (packet.market_packet.major_higher_timeframe_levels or [])
+            ],
+        ),
+        (
+            "near_key_hvn_lvn",
+            [
+                ("key_hvns", level) for level in (packet.market_packet.key_hvns or [])
+            ]
+            + [
+                ("key_lvns", level) for level in (packet.market_packet.key_lvns or [])
+            ],
+        ),
+    )
+
+    for state, levels in tiers:
+        matched = _match_tier(state, levels)
+        if matched is not None:
+            return matched
+
+    return (
+        "clear_of_structure",
+        "Current price is not within proximity threshold of any structural level.",
+    )
+
+
+def _collect_missing_inputs(packet: HistoricalPacket) -> list[str]:
+    missing_inputs: list[str] = []
+
+    if packet.market_packet.cross_market_context is None:
+        missing_inputs.append("cross_market_context")
+    if packet.market_packet.data_quality_flags is None:
+        missing_inputs.append("data_quality_flags")
+
+    extension = packet.contract_specific_extension
+    if isinstance(extension, NQContractSpecificExtension):
+        if extension.megacap_leadership_table is None:
+            missing_inputs.append("megacap_leadership_table")
+    elif isinstance(extension, CLContractSpecificExtension):
+        if extension.liquidity_sweep_summary is None:
+            missing_inputs.append("liquidity_sweep_summary")
+        if extension.dom_liquidity_summary is None:
+            missing_inputs.append("dom_liquidity_summary")
+    elif isinstance(extension, MGCContractSpecificExtension):
+        if extension.swing_penetration_volume_summary is None:
+            missing_inputs.append("swing_penetration_volume_summary")
+
+    if packet.challenge_state.last_stopout_time_by_contract is None:
+        missing_inputs.append("last_stopout_time_by_contract")
+
+    return sorted(missing_inputs)
+
+
+def _normalize_megacap_value(raw_value: Any) -> str:
+    if raw_value is None:
+        return "unknown"
+
+    normalized = str(raw_value).strip().lower()
+    if not normalized:
+        return "unknown"
+    if normalized in {"up", "higher", "positive", "+", "bullish"}:
+        return "up"
+    if normalized in {"down", "lower", "negative", "-", "bearish"}:
+        return "down"
+    if normalized in {"flat", "unchanged", "neutral", "mixed"}:
+        return "flat"
+    return "unknown"
+
+
+def _normalize_megacap_table(raw_table: dict[str, Any]) -> dict[str, str]:
+    return {
+        key: _normalize_megacap_value(value)
+        for key, value in raw_table.items()
+    }
+
+
 def _classify_opening_state(packet: HistoricalPacket) -> OpeningState:
     return {
         "Open-Drive": "open_drive",
@@ -447,6 +635,29 @@ def _classify_trigger_context(
     if packet.market_packet.current_price > price_level:
         return "above_trigger_level"
     return "below_trigger_level"
+
+
+def _compute_trigger_proximity(
+    packet: HistoricalPacket,
+    evaluation_timestamp: datetime,
+    readiness_trigger: Mapping[str, Any],
+) -> TriggerProximity:
+    if readiness_trigger["trigger_family"] == "recheck_at_time":
+        recheck_time = datetime.fromisoformat(
+            str(readiness_trigger["recheck_at_time"]).replace("Z", "+00:00")
+        )
+        return TriggerProximity(
+            trigger_family="recheck_at_time",
+            time_distance_minutes=(recheck_time - evaluation_timestamp).total_seconds() / 60,
+        )
+
+    price_level = float(readiness_trigger["price_level"])
+    return TriggerProximity(
+        trigger_family="price_level_touch",
+        price_distance_ticks=(
+            (packet.market_packet.current_price - price_level) / packet.contract_metadata.tick_size
+        ),
+    )
 
 
 def _trigger_rationale(
@@ -611,8 +822,9 @@ def _classify_contract_specific_macro_state(
 
     if isinstance(extension, NQContractSpecificExtension):
         megacap_table = extension.megacap_leadership_table or {}
-        up_count = sum(str(value).lower() == "up" for value in megacap_table.values())
-        down_count = sum(str(value).lower() == "down" for value in megacap_table.values())
+        normalized_table = _normalize_megacap_table(megacap_table)
+        up_count = sum(1 for value in normalized_table.values() if value == "up")
+        down_count = sum(1 for value in normalized_table.values() if value == "down")
         if extension.relative_strength_vs_es >= 1.02 and up_count >= down_count:
             state = "relative_strength_leader"
             awareness_flags.add("nq_relative_strength_leader")
@@ -668,7 +880,8 @@ def _classify_contract_specific_macro_state(
 
     if isinstance(extension, SixEContractSpecificExtension):
         et_timestamp = evaluation_timestamp.astimezone(ET_TZ)
-        if (et_timestamp.hour == 11 and et_timestamp.minute >= 30) or et_timestamp.hour >= 12:
+        london_close_start = _et_datetime(et_timestamp, SIXE_LONDON_CLOSE_THINNING_START_ET)
+        if et_timestamp >= london_close_start:
             state = "london_close_thinning"
             awareness_flags.add("london_close_thinning")
         elif (
