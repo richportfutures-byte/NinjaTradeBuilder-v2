@@ -3,12 +3,16 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from ninjatradebuilder.readiness_adapter import (
+    READINESS_RUNTIME_INPUT_SLOT_NAMES,
     SUPPORTED_PACKET_READINESS_CONTRACTS,
     build_readiness_runtime_inputs_from_packet,
+    is_readiness_runtime_inputs,
+    run_readiness,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -84,3 +88,67 @@ def test_build_readiness_runtime_inputs_rejects_missing_required_fields() -> Non
 
 def test_supported_packet_readiness_contracts_are_frozen() -> None:
     assert SUPPORTED_PACKET_READINESS_CONTRACTS == ("ES", "NQ", "CL", "ZN", "6E", "MGC")
+
+
+def test_is_readiness_runtime_inputs_detects_valid_inputs() -> None:
+    runtime_inputs = build_readiness_runtime_inputs_from_packet(_packet_payload("ES"))
+
+    assert is_readiness_runtime_inputs(runtime_inputs) is True
+
+
+def test_is_readiness_runtime_inputs_rejects_raw_packet() -> None:
+    assert is_readiness_runtime_inputs(_packet_payload("ES")) is False
+
+
+def test_run_readiness_delegates_for_packet_input(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    expected_result = object()
+    trigger = {"trigger_family": "recheck_at_time", "recheck_at_time": "2026-01-14T15:15:00Z"}
+    adapter = object()
+
+    def fake_run_readiness(*, runtime_inputs, readiness_trigger, model_adapter):
+        captured["runtime_inputs"] = runtime_inputs
+        captured["readiness_trigger"] = readiness_trigger
+        captured["model_adapter"] = model_adapter
+        return expected_result
+
+    monkeypatch.setattr("ninjatradebuilder.readiness_adapter.runtime_module.run_readiness", fake_run_readiness)
+
+    result = run_readiness(
+        _packet_payload("ZN"),
+        trigger,
+        model_adapter=adapter,
+    )
+
+    assert result is expected_result
+    assert captured["readiness_trigger"] == trigger
+    assert captured["model_adapter"] is adapter
+    assert captured["runtime_inputs"]["contract_metadata_json"]["contract"] == "ZN"
+    assert all(slot_name in captured["runtime_inputs"] for slot_name in READINESS_RUNTIME_INPUT_SLOT_NAMES)
+
+
+def test_run_readiness_delegates_for_runtime_inputs(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    expected_result = object()
+    trigger = {"trigger_family": "price_level_touch", "price_level": 110.40625}
+    adapter = object()
+    runtime_inputs = build_readiness_runtime_inputs_from_packet(_packet_payload("ZN"))
+
+    def fake_run_readiness(*, runtime_inputs, readiness_trigger, model_adapter):
+        captured["runtime_inputs"] = runtime_inputs
+        captured["readiness_trigger"] = readiness_trigger
+        captured["model_adapter"] = model_adapter
+        return expected_result
+
+    monkeypatch.setattr("ninjatradebuilder.readiness_adapter.runtime_module.run_readiness", fake_run_readiness)
+
+    result = run_readiness(
+        runtime_inputs,
+        trigger,
+        model_adapter=adapter,
+    )
+
+    assert result is expected_result
+    assert captured["runtime_inputs"] == runtime_inputs
+    assert captured["readiness_trigger"] == trigger
+    assert captured["model_adapter"] is adapter

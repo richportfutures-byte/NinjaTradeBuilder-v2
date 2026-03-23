@@ -4,9 +4,20 @@ from collections.abc import Mapping
 from typing import Any
 
 from .prompt_assets import MASTER_DOCTRINE_TEMPLATE
+from . import runtime as runtime_module
+from .runtime import PromptExecutionResult, StructuredModelAdapter
 from .validation import validate_historical_packet
 
 SUPPORTED_PACKET_READINESS_CONTRACTS = ("ES", "NQ", "CL", "ZN", "6E", "MGC")
+READINESS_RUNTIME_INPUT_SLOT_NAMES: tuple[str, ...] = (
+    "master_doctrine_text",
+    "evaluation_timestamp_iso",
+    "challenge_state_json",
+    "contract_metadata_json",
+    "market_packet_json",
+    "contract_specific_extension_json",
+    "attached_visuals_json",
+)
 
 
 def build_readiness_runtime_inputs_from_packet(packet_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -28,3 +39,25 @@ def build_readiness_runtime_inputs_from_packet(packet_payload: Mapping[str, Any]
         ),
         "attached_visuals_json": packet.attached_visuals.model_dump(mode="json", by_alias=True),
     }
+
+
+def is_readiness_runtime_inputs(payload: Mapping[str, Any]) -> bool:
+    return all(slot_name in payload for slot_name in READINESS_RUNTIME_INPUT_SLOT_NAMES)
+
+
+def run_readiness(
+    packet_or_runtime_inputs: Mapping[str, Any],
+    readiness_trigger: Any,
+    *,
+    model_adapter: StructuredModelAdapter,
+) -> PromptExecutionResult:
+    if is_readiness_runtime_inputs(packet_or_runtime_inputs):
+        runtime_inputs = dict(packet_or_runtime_inputs)
+    else:
+        runtime_inputs = build_readiness_runtime_inputs_from_packet(packet_or_runtime_inputs)
+
+    return runtime_module.run_readiness(
+        runtime_inputs=runtime_inputs,
+        readiness_trigger=readiness_trigger,
+        model_adapter=model_adapter,
+    )
