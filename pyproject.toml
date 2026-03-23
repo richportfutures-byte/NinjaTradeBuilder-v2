@@ -19,6 +19,9 @@ dev = [
 databento = [
   "databento>=0.57,<1",
 ]
+notebook = [
+  "marimo>=0.8,<1",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
